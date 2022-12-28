@@ -113,7 +113,7 @@ for (i in 1:60){
             facet_wrap(~Test)+
             theme_bw()
     }
-    paste0("Summary plots/", var, ".tiff", by="") %>% ggsave()
+    paste0("Summary plots/", var, ".pdf", by="") %>% ggsave()
   }
 }
 
