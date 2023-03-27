@@ -1,0 +1,1479 @@
+---
+title: "Descriptive data analysis"
+author: "Luke Qian"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy.opts = list(width.cutoff = 60), tidy = TRUE)
+```
+
+## 1. Load packages
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+library(skimr)
+```
+
+
+## 2. Data preparation
+
+
+### Survey data
+```{r, message=FALSE}
+# load the datasets
+farmSurvey = read_csv("Data/Farm Survey data.csv")
+microTest = read_csv("Data/Raw Milk Micro data.csv")
+
+# merge the two datasets
+surveyMicroData = merge(farmSurvey, microTest, by = c("FarmID", "Sampling"))
+
+# simplify column names
+colnames(surveyMicroData) = c("FarmID", "Sampling", "Loc", "University", "CertYear", "HouseStyle", 
+               "PastureTime", "StallNumPerArea", "CowNumPerArea", "StockDen", "Bedding", 
+               "BedAdd","BedAddFreq", "StallCleanFreq", "CowNum", "MilkFreq", "PplNumPerWk",
+               "PplNumPerShift", "NonFamEmp", "NonFamEmpNum", "FullEmp", "FullEmpNum",
+               "PartEmp", "PartEmpNum", "Glove", "GloveFreq", "PreDip", "PreDipType",
+               "PostDip", "PostDipType", "UdderSti", "ClipFlame", "CowMilkLoc", "Parlor",
+               "ParlorClean", "CowParlorClean", "CowWaitMilk", "HoldClean", "CowHoldClean",
+               "TeatEndScore", "TeatPercent3to4", "UdderHygScore", "UdderPercent3to4",
+               "TowelType", "TowelCleanProto", "CowTowelWipe", "CornSilage", "Haylage",
+               "CornMeal", "DryHay", "Baleage", "GrassSillage", "Earlage", "Snaplage",
+               "OtherFeed", "BioFeedAdd", "DryMatPercent", "FeedPurchase", "Coop",
+               "ClosedHerd", "Test", "GreaterLess",  "Conc", "Notes")
+
+# skim data structure
+#skim(surveyMicroData)
+
+# modify specific surveyMicroDataa entries
+surveyMicroData = surveyMicroData %>% 
+  ## remove lab errors
+  mutate(Notes = replace_na(Notes, "No notes")) %>% 
+  filter(Notes != "lab error") %>% 
+  ## remove no test
+  filter(!is.na(Test)) %>% 
+  ## replace NAs in GreaterLess with = 
+  mutate(GreaterLess = replace_na(GreaterLess, "=")) %>%
+  ## stocking density
+  mutate(StockDen = ifelse(StockDen == "BEDDED PACK" | 
+                             StockDen == "PASTURE" |
+                             StockDen == "DRY LOT", 0, StockDen),
+         StockDen = round(as.numeric(sub("%", "", StockDen))/100 ,2)) %>% 
+  ## cow number
+  mutate(CowNum = ifelse(CowNum == "??", NA, as.numeric(CowNum)),
+         CowNum = replace_na(CowNum, mean(CowNum, na.rm = TRUE))) %>% 
+  ## full employee number
+  mutate(FullEmpNum = ifelse(FullEmpNum == "3 family tend to robots", 0, FullEmpNum)) %>% 
+  ## Cows wiped with individual towels
+  mutate(CowTowelWipe = ifelse(CowTowelWipe == "robotic milker", 0, CowTowelWipe)) %>% 
+  ## Percentage of dry matter
+  mutate(DryMatPercent = case_when(
+    DryMatPercent %in% c("31-40%", "0-10%", "21-30%", "11-20%") ~ "< 40%", 
+    DryMatPercent %in% c("41-50%", "51-60%", "61-70%", "> 40%") ~ "40-70%",
+    DryMatPercent %in% c(">70%", "> 70%") ~ "> 70%")) %>% 
+  ## Test
+  mutate(Test = ifelse(Test == "MSC`", "MSC", Test)) %>% 
+  ## The frequency of adding bedding
+  mutate(BedAddFreq = case_when(
+    BedAddFreq %in% c("<1x/day", "2x/week", "< 1x per day") ~ "< 1x per day",
+    BedAddFreq %in% c("4x per day", "2x per day") ~ ">= 2x per day",
+    BedAddFreq == "1x per day" ~ "1x per day")) %>% 
+  ## Bed additives
+  mutate(BedAdd = if_else(BedAdd %in% c("ashes", "bacteria, limestone", "gypsum", "oyster shells"),
+                          "Other", BedAdd)) %>% 
+  ## Bedding materials
+  mutate(Bedding = if_else(Bedding %in% c("Other inorganic", "Recycled sand", "Sand"),
+                           "Other inorganic", Bedding),
+         Bedding = if_else(Bedding %in% c("Sawdust", "Shavings"), 
+                           "Sawdust/shavings", Bedding)) %>% 
+  ## Bio feed additives
+  mutate(BioFeedAdd = if_else(BioFeedAdd == "None", "None", "Other")) %>% 
+  ## Cow milk location
+  mutate(CowMilkLoc = case_when(
+    grepl("parlor", CowMilkLoc) ~ "Parlor",
+    CowMilkLoc %in% c("Stanchions/tie stalls", "Walk through/flat barn") ~ "Stall/barn",
+    CowMilkLoc == "Robots" ~ "Robot")) %>% 
+  ## How many cows each towel wipes
+  mutate(CowTowelWipe = ifelse(CowTowelWipe <= 1, "0 ~ 1", "> 1")) %>%
+  ## Housing style
+  mutate(HouseStyle = if_else(
+    HouseStyle %in% c("Dry lot", "Free stalls, Bedded pack", "Free stalls, Dry lot", "Pasture"),
+    "Other", HouseStyle)) %>% 
+  ## Post dip type
+  mutate(PostDipType = if_else(PostDipType == "Alcide based", "Other", PostDipType),
+         PostDipType = if_else(is.na(PostDipType), "No PostDip", PostDipType)) %>% 
+  ## Stall cleaning frequency
+  mutate(StallCleanFreq = if_else(
+    StallCleanFreq %in% c("< 1x/week", "1-3x/week", "1x per week", "3 or more times per week"),
+    "< 1x/day", StallCleanFreq)) %>% 
+  ## Udder stimulation
+  mutate(UdderSti = if_else(
+    UdderSti %in% c("Teats rubbed while cleaning", "Udder and teat massage", "Udder massage"),
+    "Other", UdderSti)) %>% 
+  ## change the towel type always to robot brush if the milk location is robot
+  mutate(TowelType = if_else(CowMilkLoc == "Robot", "Robot brush", TowelType)) %>% 
+  ## spread holding area cleaning practices into multiple variables
+  mutate(HoldHose = grepl("Hose", HoldClean),
+         HoldManScrap = grepl("Manual scraping", HoldClean),
+         HoldFluSys = grepl("Flush system", HoldClean),
+         HoldScrBru = grepl("Scrub brush", HoldClean)) %>% 
+  select(-HoldClean) %>% 
+  ## spread parlor cleaning practices into multiple variables
+  mutate(ParlorHose = grepl("Hose", ParlorClean),
+         ParlorManScrap = grepl("Manual scraping", ParlorClean),
+         ParlorFluSys = grepl("system", ParlorClean),
+         ParlorDeter = grepl("Detergent", ParlorClean),
+         ParlorScrBru = grepl("Scrub brush", ParlorClean),
+         ParlorRobot = grepl("Robot", ParlorClean)) %>% 
+  select(-ParlorClean) %>% 
+  ## spread towel cleaning protocol into two variables: bleach and drying
+  mutate(TowelChloDeter = grepl("Chlorinated detergent", TowelCleanProto),
+         TowelDeter = grepl("Detergent", TowelCleanProto),
+         TowelBleac = grepl("Bleach", TowelCleanProto),
+         TowelMacDry = grepl("Machine drying", TowelCleanProto),
+         TowelLaundry = grepl("Laundry service", TowelCleanProto),
+         TowelVinegar = grepl("Vinegar", TowelCleanProto),
+         TowelWashMac = grepl("Washing machine", TowelCleanProto)) %>% 
+  select(-TowelCleanProto) %>% 
+  ## Full employee number
+  mutate(FullEmpNum = replace_na(FullEmpNum, "0"),
+         FullEmpNum = as.numeric(FullEmpNum)) %>% 
+  select(-c(FullEmp)) %>% 
+  ## Part-time employee number
+  mutate(PartEmpNum = replace_na(PartEmpNum, 0),
+         PartEmpNum = as.numeric(PartEmpNum)) %>% 
+  ## Non family employee
+  mutate(NonFamEmpNum = replace_na(NonFamEmpNum, 0),
+         NonFamEmpNum = as.numeric(NonFamEmpNum)) %>% 
+  ## cow holding area cleaning
+  mutate(CowHoldClean = replace_na(CowHoldClean, "No holding area")) %>% 
+  ## glove change frequency
+  mutate(GloveFreq = replace_na(GloveFreq, "unknown")) %>% 
+  ## predipping type 
+  mutate(PreDipType = replace_na(PreDipType, "No predip")) %>% 
+  select(-c(PreDip)) %>% 
+  ## Remove useless columns (OtherFeed was removed due to high variability)
+  select(-c(OtherFeed, TeatPercent3to4, UdderPercent3to4, StallNumPerArea, CowNumPerArea, Notes)) 
+
+## calculate SPC variability per farm
+SPCvar = surveyMicroData %>% 
+  filter(Test == "APC") %>% 
+  mutate(Conc = if_else(GreaterLess == "<", 0.25 * Conc, Conc)) %>% 
+  group_by(FarmID) %>% 
+  summarise(SPCvar = sd(log10(Conc), na.rm = T)) %>% 
+  mutate(SPCvar = replace_na(SPCvar, mean(SPCvar, na.rm = T)))
+
+## add SPC variability as a predictor for each farm
+surveyMicroData = full_join(surveyMicroData, SPCvar, by = c("FarmID"))
+
+## Check summary stats for single variable
+#surveyMicroData %>% 
+#  group_by(Bedding) %>% 
+#  summarise(n = n()) %>% 
+#  mutate(freq = n/sum(n))
+```
+
+### Weather data 
+```{r}
+# load all weather data
+weatherData = NULL
+for (i in 1:102){
+  file_name = paste("Data/Weather Data/R", i, ".xlsx", sep = "")
+  excel_temp = read_excel(file_name)
+  weatherData = bind_rows(weatherData, excel_temp)
+}
+
+#skim(weatherData)
+
+# retain only relevant predictors
+weatherData = weatherData %>% 
+  select(farmID, datetime, tempmax, tempmin, temp, humidity, precip,
+         precipcover, windgust, windspeed, solarradiation)
+
+# data preprocessing for weather variables
+weatherData = weatherData %>% 
+  mutate(windgust = replace_na(windgust, 0))  
+#  mutate(rain = grepl("\\brain\\b", preciptype),
+#         snow = grepl("snow", preciptype),
+#         ice = grepl("ice", preciptype),
+#         freezingrain = grepl("freezingrain", preciptype)) %>% 
+#  select(-preciptype)
+
+#  subset data into four data frames
+weather_3d = weatherData %>% dplyr::slice(seq(1, n(), by = 4))
+weather_2d = weatherData %>% dplyr::slice(seq(2, n(), by = 4))
+weather_1d = weatherData %>% dplyr::slice(seq(3, n(), by = 4))
+weather_0d = weatherData %>% dplyr::slice(seq(4, n(), by = 4))
+
+# create new col names
+weatherVars = colnames(weatherData)
+colNames_1d = paste(weatherVars, "1d", sep = "_")
+colNames_2d = paste(weatherVars, "2d", sep = "_")
+colNames_3d = paste(weatherVars, "3d", sep = "_")
+
+# assign new col names to data frames
+colnames(weather_3d) = colNames_3d
+colnames(weather_2d) = colNames_2d
+colnames(weather_1d) = colNames_1d
+colnames(weather_0d) = weatherVars
+
+# combine the dataset 
+weatherData = bind_cols(weather_0d, weather_1d, weather_2d, weather_3d) %>% 
+  rename(SampleTime = datetime,
+         FarmID = farmID) %>% 
+  mutate(FarmID = paste("R", FarmID, sep = "")) %>% 
+  select(-c(farmID_1d, farmID_2d, farmID_3d,
+            datetime_1d, datetime_2d, datetime_3d))
+
+
+# create a dictionary that refers the sampling date from farm ID and sampling ID
+Dict = read_excel("Data/SampleToDate.xlsx")
+FarmID = Dict$FarmID
+Dict = Dict[,-1] %>% as.data.frame()
+rownames(Dict) = FarmID
+
+# create a column in survey micro data set to include the sampling date
+surveyMicroData$SampleTime = rep(NA, nrow(surveyMicroData))
+for (i in 1:nrow(surveyMicroData)){
+  surveyMicroData$SampleTime[i] = Dict[surveyMicroData$FarmID[i], surveyMicroData$Sampling[i]] %>% 
+    format(., "%Y-%m-%d")
+}
+```
+
+
+### Merge data
+```{r}
+# combine the survey micro data set and the weather data set
+FarmData = merge(surveyMicroData, weatherData, by = c("FarmID", "SampleTime"))
+
+
+#skim(FarmData)
+```
+
+### Clean the combined dataset
+
+```{r}
+FarmData = FarmData %>% 
+  mutate_if(is.logical, as.numeric) %>% 
+  filter(!is.na(Test) & !is.na(Conc))
+
+#skim(FarmData)
+
+# prepare the dataset for modeling
+
+```
+
+
+## 3. Descriptive analysis
+```{r, eval=FALSE}
+for (i in 1:ncol(FarmData)){
+  var = colnames(FarmData)[i]
+    ## Categorical variables
+    if (class(FarmData[[var]]) != "numeric"){
+          plot = ggplot(data = FarmData, aes(x = .data[[var]], y = log10(Conc+0.01), fill = .data[[var]]))+
+            geom_boxplot()+
+            facet_wrap(~Test)+
+            theme_bw()+
+            theme(axis.text.x=element_blank(),
+                  axis.ticks.x=element_blank())
+          
+    ## Numeric variables
+    } else {
+          plot = ggplot(data = FarmData, aes(x = .data[[var]], y = log10(Conc+0.01)))+
+            geom_point()+
+            facet_wrap(~Test)+
+            theme_bw()
+    }
+    paste0("Summary plots/", var, ".tiff", by="") %>% ggsave()
+}
+
+
+FarmData %>% 
+  ggplot(aes(x = Test, y = Conc, fill = Test)) +
+  geom_boxplot() +
+  scale_y_log10()
+
+
+```
+
+## 4. ML for explorative analysis 
+### MSC
+```{r}
+library(tidymodels)
+library(vip)
+library(learntidymodels)
+library(patchwork)
+library(ggforce)
+library(tidytext)
+set.seed(1)
+
+## Susbet data for MSC
+MSCdata = FarmData %>% 
+  filter(Test == "MSC") %>% 
+  mutate(Conc = ifelse(GreaterLess == "<", 0.25 * Conc, Conc),
+         logConc = log10(Conc)) %>% 
+  select(-c(GreaterLess, Conc, FarmID, SampleTime, Sampling, University, Coop))
+
+MSC_Parlor = MSCdata %>% 
+  filter(Parlor == "Yes")
+
+MSC_noParlor = MSCdata %>% 
+  filter(Parlor == "No")
+
+MSC_Pasture = MSCdata %>% 
+  filter(PastureTime != 0)
+
+MSC_noPasture = MSCdata %>% 
+  filter(PastureTime == 0)
+
+MSC_list = list(MSCdata, MSC_Parlor, MSC_noParlor, MSC_Pasture, MSC_noPasture)
+subset_names = c("All", "Parlor", "noParlor", "Pasture", "noPasture")
+MSC_rs_paras = tibble()
+MSC_PCA_explained = data.frame(matrix(NA, ncol = 5, nrow = 5)) 
+names(MSC_PCA_explained) = subset_names
+
+## Model formula
+for (i in 1:length(MSC_list)){
+  MSC_recipe = recipe(logConc ~ ., data = MSC_list[[i]]) %>% 
+    step_zv(all_predictors()) %>% 
+    step_normalize(all_numeric_predictors()) %>%
+    step_pca(c("tempmax","tempmin","temp","humidity","precip","precipcover","windgust",      
+             "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","humidity_1d",
+             "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
+             "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
+             "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
+             "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), num_comp = 5) %>%
+    step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>% 
+    step_nzv(all_predictors(), freq_cut = 85/15) 
+
+  rf_spec = rand_forest(
+     trees = 1000,
+     min_n = tune(),
+     mtry = tune()) %>% 
+     set_engine("ranger") %>% 
+     set_mode("regression")
+  
+  dimension = MSC_recipe %>% prep() %>% bake(NULL) %>% dim()
+  nVar = dimension[2]
+  
+  rf_grid = grid_max_entropy(
+    min_n(c(1L, 40L)),
+    mtry(c(1L, nVar)),
+    size = 40
+  )
+  
+  MSC_wf = workflow() %>% 
+    add_recipe(MSC_recipe) %>% 
+    add_model(rf_spec)
+  
+  MSC_folds = vfold_cv(MSC_list[[i]], strata = logConc, v = 3)
+  
+  MSC_rs = tune_grid(
+    MSC_wf,
+    MSC_folds,
+    grid = rf_grid,
+    metrics = metric_set(rsq),
+    control = control_grid(verbose = FALSE)
+  )
+  
+  best_rs = show_best(MSC_rs, metric = "rsq")
+  best_rs_paras = best_rs %>% slice(1) %>% mutate(dataset = subset_names[i])
+  MSC_rs_paras = bind_rows(best_rs_paras, MSC_rs_paras)
+  
+  imp_spec = rf_spec %>% 
+    finalize_model(select_best(MSC_rs, "rsq")) %>% 
+    set_engine("ranger", importance = "permutation")
+
+  vip_plot = workflow() %>% 
+      add_recipe(MSC_recipe) %>% 
+      add_model(imp_spec) %>% 
+      fit(MSC_list[[i]]) %>% 
+      extract_fit_parsnip() %>% 
+      vip(geom = "point", num_features = 15)
+  
+  file_name = paste0("Figure/MSC/MSC_VIP_", subset_names[i], ".tiff")
+  ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
+  
+  pca_prep = prep(MSC_recipe)
+
+  tidied_pca = tidy(pca_prep, 3)
+
+  tidied_pca %>%
+    filter(component %in% paste0("PC", 1:5)) %>%
+    mutate(component = fct_inorder(component)) %>%
+    ggplot(aes(value, terms, fill = terms)) +
+    geom_col(show.legend = FALSE) +
+    facet_wrap(~component, nrow = 1) +
+    labs(y = NULL) +
+    theme(axis.text.y = element_text(size = 5))
+  file_name = paste0("Figure/MSC/MSC_PCA_", subset_names[i], ".tiff")
+  ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
+
+  tidied_pca %>%
+    filter(component %in% paste0("PC", 1:5)) %>%
+    group_by(component) %>%
+    top_n(8, abs(value)) %>%
+    ungroup() %>%
+    mutate(terms = reorder_within(terms, abs(value), component)) %>%
+    ggplot(aes(abs(value), terms, fill = value > 0)) +
+    geom_col() +
+    facet_wrap(~component, scales = "free_y") +
+    scale_y_reordered() +
+    labs(
+      x = "Absolute value of contribution",
+      y = NULL, fill = "Positive?"
+    )
+    file_name = paste0("Figure/MSC/MSC_PCA_top_", subset_names[i], ".tiff")
+    ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
+    
+    sdev = pca_prep$steps[[3]]$res$sdev
+    percent_variation = sdev^2 / sum(sdev^2)
+    var_df = data.frame(PC=paste0("PC",1:length(sdev)),
+                       var_explained=percent_variation,
+                       stringsAsFactors = FALSE)
+    
+    top5 = var_df[1:5, 2]
+    MSC_PCA_explained[,i] = top5    
+
+}
+
+MSC_rs_paras
+MSC_PCA_explained
+
+save(MSC_rs_paras, file = "Results/MSC_results.RData")
+save(MSC_PCA_explained, file = "Results/MSC_PCA_results.RData")
+
+```
+
+### TSC
+```{r}
+set.seed(1)
+
+## Susbet data for TSC
+TSCdata = FarmData %>% 
+  filter(Test == "TSC") %>% 
+  mutate(Conc = ifelse(GreaterLess == "<", 0.25 * Conc, Conc),
+         logConc = log10(Conc)) %>% 
+  select(-c(GreaterLess, Conc, FarmID, SampleTime, Sampling, University, Coop))
+
+TSC_Parlor = TSCdata %>% 
+  filter(Parlor == "Yes")
+
+TSC_noParlor = TSCdata %>% 
+  filter(Parlor == "No")
+
+TSC_Pasture = TSCdata %>% 
+  filter(PastureTime != 0)
+
+TSC_noPasture = TSCdata %>% 
+  filter(PastureTime == 0)
+
+TSC_list = list(TSCdata, TSC_Parlor, TSC_noParlor, TSC_Pasture, TSC_noPasture)
+subset_names = c("All", "Parlor", "noParlor", "Pasture", "noPasture")
+TSC_rs_paras = tibble()
+TSC_PCA_explained = data.frame(matrix(NA, ncol = 5, nrow = 5)) 
+names(TSC_PCA_explained) = subset_names
+
+## Model formula
+for (i in 1:length(TSC_list)){
+  TSC_recipe = recipe(logConc ~ ., data = TSC_list[[i]]) %>% 
+    step_zv(all_predictors()) %>% 
+    step_normalize(all_numeric_predictors()) %>%
+    step_pca(c("tempmax","tempmin","temp","humidity","precip","precipcover","windgust",      
+             "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","humidity_1d",
+             "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
+             "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
+             "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
+             "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), num_comp = 5) %>%
+    step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>% 
+    step_nzv(all_predictors(), freq_cut = 85/15) 
+
+  rf_spec = rand_forest(
+     trees = 1000,
+     min_n = tune(),
+     mtry = tune()) %>% 
+     set_engine("ranger") %>% 
+     set_mode("regression")
+  
+  dimension = TSC_recipe %>% prep() %>% bake(NULL) %>% dim()
+  nVar = dimension[2]
+  
+  rf_grid = grid_max_entropy(
+    min_n(c(1L, 40L)),
+    mtry(c(1L, nVar)),
+    size = 40
+  )
+  
+  TSC_wf = workflow() %>% 
+    add_recipe(TSC_recipe) %>% 
+    add_model(rf_spec)
+  
+  TSC_folds = vfold_cv(TSC_list[[i]], strata = logConc, v = 3)
+  
+  TSC_rs = tune_grid(
+    TSC_wf,
+    TSC_folds,
+    grid = rf_grid,
+    metrics = metric_set(rsq),
+    control = control_grid(verbose = FALSE)
+  )
+  
+  best_rs = show_best(TSC_rs, metric = "rsq")
+  best_rs_paras = best_rs %>% slice(1) %>% mutate(dataset = subset_names[i])
+  TSC_rs_paras = bind_rows(best_rs_paras, TSC_rs_paras)
+  
+  imp_spec = rf_spec %>% 
+    finalize_model(select_best(TSC_rs, "rsq")) %>% 
+    set_engine("ranger", importance = "permutation")
+
+  vip_plot = workflow() %>% 
+      add_recipe(TSC_recipe) %>% 
+      add_model(imp_spec) %>% 
+      fit(TSC_list[[i]]) %>% 
+      extract_fit_parsnip() %>% 
+      vip(geom = "point", num_features = 15)
+  
+  file_name = paste0("Figure/TSC/TSC_VIP_", subset_names[i], ".tiff")
+  ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
+  
+  pca_prep = prep(TSC_recipe)
+
+  tidied_pca = tidy(pca_prep, 3)
+
+  tidied_pca %>%
+    filter(component %in% paste0("PC", 1:5)) %>%
+    mutate(component = fct_inorder(component)) %>%
+    ggplot(aes(value, terms, fill = terms)) +
+    geom_col(show.legend = FALSE) +
+    facet_wrap(~component, nrow = 1) +
+    labs(y = NULL) +
+    theme(axis.text.y = element_text(size = 5))
+  file_name = paste0("Figure/TSC/TSC_PCA_", subset_names[i], ".tiff")
+  ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
+
+  tidied_pca %>%
+    filter(component %in% paste0("PC", 1:5)) %>%
+    group_by(component) %>%
+    top_n(8, abs(value)) %>%
+    ungroup() %>%
+    mutate(terms = reorder_within(terms, abs(value), component)) %>%
+    ggplot(aes(abs(value), terms, fill = value > 0)) +
+    geom_col() +
+    facet_wrap(~component, scales = "free_y") +
+    scale_y_reordered() +
+    labs(
+      x = "Absolute value of contribution",
+      y = NULL, fill = "Positive?"
+    )
+    file_name = paste0("Figure/TSC/TSC_PCA_top_", subset_names[i], ".tiff")
+    ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
+    
+    sdev = pca_prep$steps[[3]]$res$sdev
+    percent_variation = sdev^2 / sum(sdev^2)
+    var_df = data.frame(PC=paste0("PC",1:length(sdev)),
+                       var_explained=percent_variation,
+                       stringsAsFactors = FALSE)
+    
+    top5 = var_df[1:5, 2]
+    TSC_PCA_explained[,i] = top5 
+
+}
+
+TSC_rs_paras
+TSC_PCA_explained
+
+save(TSC_rs_paras, file = "Results/TSC_results.RData")
+save(TSC_PCA_explained, file = "Results/TSC_PCA_results.RData")
+```
+
+### PSC
+```{r}
+library(themis)
+set.seed(1)
+
+## Susbet data for PSC
+PSCdata = FarmData %>% 
+  filter(Test == "PSC") %>% 
+  mutate(Pres = ifelse(GreaterLess == "<", 0, 1),
+         Pres = as.factor(Pres)) %>% 
+  select(-c(GreaterLess, Conc, FarmID, SampleTime, Sampling, University, Coop))
+
+PSC_Parlor = PSCdata %>% 
+  filter(Parlor == "Yes")
+
+PSC_noParlor = PSCdata %>% 
+  filter(Parlor == "No")
+
+PSC_Pasture = PSCdata %>% 
+  filter(PastureTime != 0)
+
+PSC_noPasture = PSCdata %>% 
+  filter(PastureTime == 0)
+
+PSC_list = list(PSCdata, PSC_Parlor, PSC_noParlor, PSC_Pasture, PSC_noPasture)
+subset_names = c("All", "Parlor", "noParlor", "Pasture", "noPasture")
+PSC_rs_paras = tibble()
+PSC_PCA_explained = data.frame(matrix(NA, ncol = 5, nrow = 5)) 
+names(PSC_PCA_explained) = subset_names
+
+## Model formula
+for (i in 1:length(PSC_list)){
+  PSC_recipe = recipe(Pres ~ ., data = PSC_list[[i]]) %>% 
+    step_zv(all_predictors()) %>% 
+    step_normalize(all_numeric_predictors()) %>%
+    step_pca(c("tempmax","tempmin","temp","humidity","precip","precipcover","windgust",      
+             "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","humidity_1d",
+             "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
+             "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
+             "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
+             "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), num_comp = 5) %>%
+    step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>% 
+    step_nzv(all_predictors(), freq_cut = 85/15) %>% 
+    step_smotenc(Pres)
+
+  rf_spec = rand_forest(
+     trees = 1000,
+     min_n = tune(),
+     mtry = tune()) %>% 
+     set_engine("ranger") %>% 
+     set_mode("classification")
+  
+  dimension = PSC_recipe %>% prep() %>% bake(NULL) %>% dim()
+  nVar = dimension[2]
+  
+  rf_grid = grid_max_entropy(
+    min_n(c(1L, 40L)),
+    mtry(c(1L, nVar)),
+    size = 40
+  )
+  
+  PSC_wf = workflow() %>% 
+    add_recipe(PSC_recipe) %>% 
+    add_model(rf_spec)
+  
+  PSC_folds = vfold_cv(PSC_list[[i]], strata = Pres, v = 3)
+  
+  PSC_rs = tune_grid(
+    PSC_wf,
+    PSC_folds,
+    grid = rf_grid,
+    metrics = metric_set(roc_auc, accuracy),
+    control = control_grid(verbose = FALSE)
+  )
+  
+  best_rs = show_best(PSC_rs, metric = "accuracy")
+  best_rs_paras = best_rs %>% slice(1) %>% mutate(dataset = subset_names[i])
+  PSC_rs_paras = bind_rows(best_rs_paras, PSC_rs_paras)
+  
+  imp_spec = rf_spec %>% 
+    finalize_model(select_best(PSC_rs, "accuracy")) %>% 
+    set_engine("ranger", importance = "permutation")
+
+  vip_plot = workflow() %>% 
+      add_recipe(PSC_recipe) %>% 
+      add_model(imp_spec) %>% 
+      fit(PSC_list[[i]]) %>% 
+      extract_fit_parsnip() %>% 
+      vip(geom = "point", num_features = 15)
+  
+  file_name = paste0("Figure/PSC/PSC_VIP_", subset_names[i], ".tiff")
+  ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
+  
+  pca_prep = prep(PSC_recipe)
+
+  tidied_pca = tidy(pca_prep, 3)
+
+  tidied_pca %>%
+    filter(component %in% paste0("PC", 1:5)) %>%
+    mutate(component = fct_inorder(component)) %>%
+    ggplot(aes(value, terms, fill = terms)) +
+    geom_col(show.legend = FALSE) +
+    facet_wrap(~component, nrow = 1) +
+    labs(y = NULL) +
+    theme(axis.text.y = element_text(size = 5))
+  file_name = paste0("Figure/PSC/PSC_PCA_", subset_names[i], ".tiff")
+  ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
+
+  tidied_pca %>%
+    filter(component %in% paste0("PC", 1:5)) %>%
+    group_by(component) %>%
+    top_n(8, abs(value)) %>%
+    ungroup() %>%
+    mutate(terms = reorder_within(terms, abs(value), component)) %>%
+    ggplot(aes(abs(value), terms, fill = value > 0)) +
+    geom_col() +
+    facet_wrap(~component, scales = "free_y") +
+    scale_y_reordered() +
+    labs(
+      x = "Absolute value of contribution",
+      y = NULL, fill = "Positive?"
+    )
+    file_name = paste0("Figure/PSC/PSC_PCA_top_", subset_names[i], ".tiff")
+    ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
+    
+    sdev = pca_prep$steps[[3]]$res$sdev
+    percent_variation = sdev^2 / sum(sdev^2)
+    var_df = data.frame(PC=paste0("PC",1:length(sdev)),
+                       var_explained=percent_variation,
+                       stringsAsFactors = FALSE)
+    
+    top5 = var_df[1:5, 2]
+    PSC_PCA_explained[,i] = top5 
+
+}
+
+PSC_rs_paras
+PSC_PCA_explained
+
+save(PSC_rs_paras, file = "Results/PSC_results.RData")
+save(PSC_PCA_explained, file = "Results/PSC_PCA_results.RData")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+################################################## archive #####################################################
+
+## 4. ML for explorative analysis (archived)
+```{r, eval=FALSE}
+library(tidymodels)
+set.seed(1)
+
+# Model for predicting MSC
+MSCdata = FarmData %>% 
+  filter(Test == "MSC") %>% 
+  mutate(Conc = ifelse(GreaterLess == "<", 0.25 * Conc, Conc)) %>% 
+  mutate(logConc = log10(Conc)) %>% 
+  select(-c(FarmID, Loc, Sampling, Test, GreaterLess, SampleTime, Conc, University, Coop))
+
+#MSCdata = FarmData %>% 
+#  filter(Test == "TSC") %>% 
+#  mutate(logConc = log10(Conc)) %>% 
+#  select(-c(FarmID, Sampling, Test, GreaterLess, SampleTime, UneditConc, Conc))
+
+# Subset data for training and testing
+MSC_split= initial_split(MSCdata, prop = 0.7, strata = logConc)
+MSC_train = training(MSC_split)
+MSC_test = testing(MSC_split)
+
+# Cross-validation
+MSC_folds = vfold_cv(MSC_train , strata = logConc, v = 5)
+
+# Model formula and variable pre-processing
+weatherVars = weatherData %>% 
+  select(-c(FarmID, SampleTime)) %>% 
+  colnames()
+
+MSC_recipe = recipe(logConc ~ ., data = MSC_train) %>% 
+  #update_role(CertYear, new_role = "Non-predictor") %>% 
+  step_zv(all_predictors()) %>% 
+  step_pca(c("tempmax","tempmin","temp","humidity","precip","precipcover","windgust",      
+             "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","humidity_1d",
+             "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
+             "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
+             "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
+             "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), threshold = 0.9) %>% 
+  #step_pca(all_numeric_predictors(), threshold = 0.95) %>% 
+  step_normalize(all_numeric_predictors()) %>% 
+  #step_other(all_nominal_predictors(), threshold = 0.5) %>% 
+  step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
+  #step_corr(all_numeric_predictors(), threshold = 0.8) %>% 
+  step_nzv(all_predictors(), freq_cut = 85/15) 
+
+MSC_recipe %>% prep() %>%  bake(NULL) %>% dim()
+
+# Set up specs for random forest and xgboost
+rf_spec = 
+   rand_forest(
+     trees = 1000,
+     min_n = tune(),
+     mtry = tune()
+     ) %>% 
+   set_engine("ranger") %>% 
+   set_mode("regression")
+
+xgb_spec =   
+  boost_tree(
+    trees = 1000,
+    min_n = tune(),
+    mtry = tune(),
+    tree_depth = tune(),
+    sample_size = tune(),
+    learn_rate = tune()
+  ) %>%
+  set_engine("xgboost") %>% 
+  set_mode("regression")
+
+#nnet_spec = 
+#   mlp(hidden_units = tune(), 
+#       penalty = tune(), 
+#       epochs = tune()) %>% 
+#   set_engine("nnet", MaxNWts = 2600) %>% 
+#   set_mode("classification")
+
+
+# Set up workflows
+rf_wf = workflow(MSC_recipe, rf_spec)
+xgb_wf = workflow(MSC_recipe, xgb_spec)
+#nnet_wf = workflow(MSC_recipe, nnet_spec)
+
+# Set up grid search for model training
+rf_grid = 
+  grid_max_entropy(
+    min_n(c(1L, 40L)),
+    mtry(c(1L, 50L)),
+    size = 40
+  )
+
+xgb_grid = 
+  grid_max_entropy(
+    tree_depth(c(1L, 10L)),
+    min_n(c(1L, 40L)),
+    mtry(c(1L, 100L)),
+    sample_prop(c(0.1, 1.0)),
+    learn_rate(c(-2, -1)),
+    size = 40
+  )
+
+# Parallel computing for model training
+library(finetune)
+#doParallel::registerDoParallel()
+
+
+rf_rs = tune_race_anova(
+  rf_wf,
+  MSC_folds,
+  grid = rf_grid,
+  metrics = metric_set(rsq),
+  control = control_race(verbose_elim = T)
+  )
+
+#xgb_rs = tune_race_anova(
+#  xgb_wf,
+#  MSC_folds,
+#  grid = xgb_grid,
+#  metrics = metric_set(rsq),
+#  control = control_race(verbose_elim = T)
+#  )
+
+#nnet_rs = tune_race_anova(
+#  nnet_wf,
+#  MSC_folds,
+#  #grid = xgb_grid,
+#  metrics = metric_set(rmse),
+#  control = control_race(verbose_elim = T)
+#  )
+
+# Show best results
+plot_race(rf_rs)
+show_best(rf_rs, metric = "rsq")
+#show_best(xgb_rs, metric = "rsq")
+#show_best(nnet_rs, metric = "rmse")
+
+# Show training results
+rf_last = 
+  rf_wf %>% 
+  finalize_workflow(select_best(rf_rs, "rsq")) %>% 
+  last_fit(MSC_split)
+
+#xgb_last = 
+#  xgb_wf %>% 
+#  finalize_workflow(select_best(xgb_rs, "rsq")) %>% 
+#  last_fit(MSC_split)
+
+#nnet_last = 
+#  nnet_wf %>% 
+#  finalize_workflow(select_best(nnet_rs, "rmse")) %>% 
+#  last_fit(MSC_split)
+
+
+# Model validation on the testing set
+rf_last %>% 
+  collect_predictions() %>% 
+  rsq(.pred, logConc)
+  #ggplot(aes(x = .pred, y = logConc)) +
+  #geom_point()
+
+
+
+#xgb_last %>% 
+#  collect_predictions() %>% 
+#  ggplot(aes(x = .pred, y = logConc)) +
+#  geom_point()
+
+#nnet_last %>% 
+#  collect_predictions() %>% 
+#  conf_mat(.pred_class, LessThan10)
+
+# Variable importance plot
+library(vip)
+imp_spec = rf_spec %>% 
+  finalize_model(select_best(rf_rs, "rsq")) %>% 
+  set_engine("ranger", importance = "permutation")
+
+workflow() %>% 
+  add_recipe(MSC_recipe) %>% 
+  add_model(imp_spec) %>% 
+  fit(MSC_train) %>% 
+  extract_fit_parsnip() %>% 
+  vip(geom = "point", num_features = 15)
+
+#imp_spec = xgb_spec %>% 
+#  finalize_model(select_best(xgb_rs, "rsq")) %>% 
+#  set_engine("xgboost", importance = "permutation")
+
+#workflow() %>% 
+#  add_recipe(MSC_recipe) %>% 
+#  add_model(imp_spec) %>% 
+#  fit(MSC_train) %>% 
+#  extract_fit_parsnip() %>% 
+#  vip(geom = "point", num_features = 15)
+
+
+# PCA
+#library(learntidymodels)
+#library(patchwork)
+#library(ggforce)
+#library(tidytext)
+
+#pca_prep = prep(MSC_recipe)
+
+#tidied_pca = tidy(pca_prep, 2)
+
+#tidied_pca %>%
+#  filter(component %in% paste0("PC", 1:5)) %>%
+#  mutate(component = fct_inorder(component)) %>%
+#  ggplot(aes(value, terms, fill = terms)) +
+#  geom_col(show.legend = FALSE) +
+#  facet_wrap(~component, nrow = 1) +
+#  labs(y = NULL) +
+#  theme(axis.text.y = element_text(size = 5))
+
+#tidied_pca %>%
+#  filter(component %in% paste0("PC", 1:4)) %>%
+#  group_by(component) %>%
+#  top_n(8, abs(value)) %>%
+#  ungroup() %>%
+#  mutate(terms = reorder_within(terms, abs(value), component)) %>%
+#  ggplot(aes(abs(value), terms, fill = value > 0)) +
+#  geom_col() +
+#  facet_wrap(~component, scales = "free_y") +
+#  scale_y_reordered() +
+#  labs(
+#    x = "Absolute value of contribution",
+#    y = NULL, fill = "Positive?"
+#  )
+
+
+###############################################################
+#sdev = pca_prep$steps[[2]]$res$sdev
+#percent_variation = sdev^2 / sum(sdev^2)
+#var_df = data.frame(PC=paste0("PC",1:length(sdev)),
+#                     var_explained=percent_variation,
+#                     stringsAsFactors = FALSE)
+#var_df %>%
+#  dplyr::slice(1:10) %>% 
+#  mutate(PC = fct_inorder(PC)) %>%
+#  ggplot(aes(x=PC,y=var_explained))+geom_col()
+```
+
+## TSC
+```{r, eval=FALSE}
+set.seed(1)
+
+# Model for predicting TSC
+TSCdata = FarmData %>% 
+  filter(Test == "TSC") %>% 
+  mutate(logConc = log10(Conc)) %>% 
+  select(-c(FarmID, Sampling, Test, GreaterLess, SampleTime, UneditConc, Conc))
+
+# Subset data for training and testing
+TSC_split= initial_split(TSCdata, prop = 524/525, strata = logConc)
+TSC_train = training(TSC_split)
+TSC_test = testing(TSC_split)
+
+# Cross-validation
+TSC_folds = vfold_cv(TSC_train , strata = logConc, v = 5)
+
+# Model formula and variable pre-processing
+weatherVars = weatherData %>% 
+  select(-c(FarmID, SampleTime)) %>% 
+  colnames()
+
+TSC_recipe = recipe(logConc ~ ., data = TSC_train) %>% 
+  update_role(CertYear, Loc, Coop, University, new_role = "Non-predictor") %>% 
+  step_zv(all_predictors()) %>% 
+  #step_pca(c("tempmax","tempmin","temp","dew","humidity","precip","precipcover","windgust",      
+  #           "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","dew_1d","humidity_1d",
+  #           "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
+  #           "tempmin_2d","temp_2d","dew_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
+  #           "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d", "dew_3d", "humidity_3d", "precip_3d",
+  #           "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), threshold = 0.9) %>% 
+  #step_pca(all_numeric_predictors(), threshold = 0.95) %>% 
+  step_normalize(all_numeric_predictors()) %>% 
+  #step_other(all_nominal_predictors(), threshold = 0.5) %>% 
+  step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
+  #step_corr(all_numeric_predictors(), threshold = 0.8) %>% 
+  step_nzv(all_predictors(), freq_cut = 90/10) 
+
+TSC_recipe %>% prep() %>%  bake(NULL) %>% dim()
+
+# Set up specs for random forest and xgboost
+rf_spec = 
+   rand_forest(
+     trees = 1000,
+     min_n = tune(),
+     mtry = tune()
+     ) %>% 
+   set_engine("ranger") %>% 
+   set_mode("regression")
+
+xgb_spec =   
+  boost_tree(
+    trees = 1000,
+    min_n = tune(),
+    mtry = tune(),
+    tree_depth = tune(),
+    sample_size = tune(),
+    learn_rate = tune()
+  ) %>%
+  set_engine("xgboost") %>% 
+  set_mode("regression")
+
+#nnet_spec = 
+#   mlp(hidden_units = tune(), 
+#       penalty = tune(), 
+#       epochs = tune()) %>% 
+#   set_engine("nnet", MaxNWts = 2600) %>% 
+#   set_mode("classification")
+
+
+# Set up workflows
+rf_wf = workflow(TSC_recipe, rf_spec)
+xgb_wf = workflow(TSC_recipe, xgb_spec)
+#nnet_wf = workflow(TSC_recipe, nnet_spec)
+
+# Set up grid search for model training
+rf_grid = 
+  grid_max_entropy(
+    min_n(c(1L, 40L)),
+    mtry(c(1L, 98L)),
+    size = 40
+  )
+
+xgb_grid = 
+  grid_max_entropy(
+    tree_depth(c(1L, 10L)),
+    min_n(c(1L, 40L)),
+    mtry(c(1L, 98L)),
+    sample_prop(c(0.1, 1.0)),
+    learn_rate(c(-2, -1)),
+    size = 40
+  )
+
+# Parallel computing for model training
+library(finetune)
+doParallel::registerDoParallel()
+
+
+rf_rs = tune_race_anova(
+  rf_wf,
+  TSC_folds,
+  grid = rf_grid,
+  metrics = metric_set(rsq),
+  control = control_race(verbose_elim = T)
+  )
+
+#xgb_rs = tune_race_anova(
+#  xgb_wf,
+#  TSC_folds,
+#  grid = xgb_grid,
+#  metrics = metric_set(rsq),
+#  control = control_race(verbose_elim = T)
+#  )
+
+#nnet_rs = tune_race_anova(
+#  nnet_wf,
+#  TSC_folds,
+#  #grid = xgb_grid,
+#  metrics = metric_set(rmse),
+#  control = control_race(verbose_elim = T)
+#  )
+
+# Show best results
+plot_race(rf_rs)
+show_best(rf_rs, metric = "rsq")
+#show_best(xgb_rs, metric = "rsq")
+#show_best(nnet_rs, metric = "rmse")
+
+# Show training results
+rf_last = 
+  rf_wf %>% 
+  finalize_workflow(select_best(rf_rs, "rsq")) %>% 
+  last_fit(TSC_split)
+
+#xgb_last = 
+##  xgb_wf %>% 
+#  finalize_workflow(select_best(xgb_rs, "rsq")) %>% 
+#  last_fit(TSC_split)
+
+#nnet_last = 
+#  nnet_wf %>% 
+#  finalize_workflow(select_best(nnet_rs, "rmse")) %>% 
+#  last_fit(TSC_split)
+
+
+# Model validation on the testing set
+rf_last %>% 
+  collect_predictions() %>% 
+  ggplot(aes(x = .pred, y = logConc)) +
+  geom_point()
+
+#xgb_last %>% 
+#  collect_predictions() %>% 
+#  ggplot(aes(x = .pred, y = logConc)) +
+#  geom_point()
+
+#nnet_last %>% 
+#  collect_predictions() %>% 
+#  conf_mat(.pred_class, LessThan10)
+
+# Variable importance plot
+library(vip)
+imp_spec = rf_spec %>% 
+  finalize_model(select_best(rf_rs, "rsq")) %>% 
+  set_engine("ranger", importance = "permutation")
+
+workflow() %>% 
+  add_recipe(TSC_recipe) %>% 
+  add_model(imp_spec) %>% 
+  fit(TSC_train) %>% 
+  extract_fit_parsnip() %>% 
+  vip(geom = "point", num_features = 15)
+
+#imp_spec = xgb_spec %>% 
+#  finalize_model(select_best(xgb_rs, "rsq")) %>% 
+#  set_engine("xgboost", importance = "permutation")
+
+#workflow() %>% 
+##  add_recipe(TSC_recipe) %>% 
+#  add_model(imp_spec) %>% 
+#  fit(TSC_train) %>% 
+#  extract_fit_parsnip() %>% 
+#  vip(geom = "point", num_features = 15)
+
+# PCA
+#pca_prep = prep(TSC_recipe)
+
+#tidied_pca = tidy(pca_prep, 2)
+
+#tidied_pca %>%
+#  filter(component %in% paste0("PC", 1:5)) %>%
+#  mutate(component = fct_inorder(component)) %>%
+#  ggplot(aes(value, terms, fill = terms)) +
+#  geom_col(show.legend = FALSE) +
+#  facet_wrap(~component, nrow = 1) +
+#  labs(y = NULL) +
+#  theme(axis.text.y = element_text(size = 5))
+
+#tidied_pca %>%
+#  filter(component %in% paste0("PC", 1:4)) %>%
+#  group_by(component) %>%
+#  top_n(8, abs(value)) %>%
+#  ungroup() %>%
+#  mutate(terms = reorder_within(terms, abs(value), component)) %>%
+#  ggplot(aes(abs(value), terms, fill = value > 0)) +
+#  geom_col() +
+#  facet_wrap(~component, scales = "free_y") +
+#  scale_y_reordered() +
+#  labs(
+#    x = "Absolute value of contribution",
+#    y = NULL, fill = "Positive?"
+#  )
+
+
+###############################################################
+#sdev = pca_prep$steps[[2]]$res$sdev
+#percent_variation = sdev^2 / sum(sdev^2)
+#var_df = data.frame(PC=paste0("PC",1:length(sdev)),
+#                     var_explained=percent_variation,
+#                     stringsAsFactors = FALSE)
+#var_df %>%
+#  dplyr::slice(1:10) %>% 
+#  mutate(PC = fct_inorder(PC)) %>%
+#  ggplot(aes(x=PC,y=var_explained))+geom_col()
+```
+
+
+## linear mixed effect model
+```{r, eval=FALSE}
+library(multilevelmod)
+library(tidymodels)
+library(lme4)
+
+MSCdata = FarmData %>% 
+  filter(Test == "MSC") %>% 
+  mutate(logConc = log10(Conc)) %>% 
+  select(-c(Sampling, Test, GreaterLess, SampleTime, UneditConc, Conc)) %>% 
+  select(-c(FarmID, Loc, CertYear, Coop, University))
+
+
+MSC_recipe = recipe(logConc ~., data = MSCdata) %>% 
+  #update_role(FarmID, CertYear, Loc, Coop, University, new_role = "Non-predictor") %>% 
+  step_zv(all_predictors()) %>% 
+  step_normalize(all_numeric_predictors()) %>% 
+  #step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
+  step_nzv(all_predictors(), freq_cut = 90/10) 
+
+MSCdata_proc = MSC_recipe %>% prep() %>% bake(NULL)
+
+lm_fit = lm(formula = logConc ~ ., data = MSCdata_proc)
+summary(lm_fit)
+```
+
+
+## PCA
+```{r, eval=FALSE}
+library(learntidymodels)
+library(patchwork)
+library(ggforce)
+library(tidytext)
+
+pca_prep = prep(MSC_recipe)
+
+tidied_pca = tidy(pca_prep, 2)
+
+tidied_pca %>%
+  filter(component %in% paste0("PC", 1:5)) %>%
+  mutate(component = fct_inorder(component)) %>%
+  ggplot(aes(value, terms, fill = terms)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~component, nrow = 1) +
+  labs(y = NULL) +
+  theme(axis.text.y = element_text(size = 5))
+
+tidied_pca %>%
+  filter(component %in% paste0("PC", 1:4)) %>%
+  group_by(component) %>%
+  top_n(8, abs(value)) %>%
+  ungroup() %>%
+  mutate(terms = reorder_within(terms, abs(value), component)) %>%
+  ggplot(aes(abs(value), terms, fill = value > 0)) +
+  geom_col() +
+  facet_wrap(~component, scales = "free_y") +
+  scale_y_reordered() +
+  labs(
+    x = "Absolute value of contribution",
+    y = NULL, fill = "Positive?"
+  )
+
+
+###############################################################
+rng = extendrange(c(pca_data$PC01, pca_data$PC02))
+plot(pca_data$PC01, pca_data$PC02,
+  xlim = rng, ylim = rng
+)
+
+sdev = pca_prep$steps[[2]]$res$sdev
+percent_variation = sdev^2 / sum(sdev^2)
+var_df = data.frame(PC=paste0("PC",1:length(sdev)),
+                     var_explained=percent_variation,
+                     stringsAsFactors = FALSE)
+var_df %>%
+  dplyr::slice(1:10) %>% 
+  mutate(PC = fct_inorder(PC)) %>%
+  ggplot(aes(x=PC,y=var_explained))+geom_col()
+
+```
+
+
+## Screening multiple preprocessing methods and models
+```{r, eval=FALSE}
+set.seed(1)
+
+# Model for predicting MSC
+MSCdata = FarmData %>% 
+  filter(Test == "MSC") %>% 
+  mutate(LessThan10 = if_else(Conc <= 10, 0, 1) %>% as.factor) %>% 
+  select(-c(FarmID, Sampling, Test, GreaterLess, SampleTime, UneditConc, Conc))
+
+# Subset data for training and testing
+MSC_split= initial_split(MSCdata, prop = 0.7, strata = LessThan10)
+MSC_train = training(MSC_split)
+MSC_test = testing(MSC_split)
+
+# Cross-validation
+MSC_folds = vfold_cv(MSC_train , strata = LessThan10, v = 5)
+
+# Model formula and variable pre-processing
+weatherVars = weatherData %>% 
+  select(-c(FarmID, SampleTime)) %>% 
+  colnames()
+
+pca_rec = recipe(LessThan10 ~ ., data = MSC_train) %>% 
+  #update_role(FarmID, Sampling, Test, GreaterLess, SampleTime, UneditConc, Conc,
+  #            new_role = "Non-predictor") %>% 
+  step_zv(all_predictors()) %>% 
+  step_pca(c("tempmax","tempmin","temp","dew","humidity","precip","precipcover","windgust",      
+             "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","dew_1d","humidity_1d",
+             "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
+             "tempmin_2d","temp_2d","dew_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
+             "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d", "dew_3d", "humidity_3d", "precip_3d",
+             "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), threshold = 0.8) %>% 
+  step_normalize(all_numeric_predictors()) %>% 
+  #step_other(all_nominal_predictors(), threshold = 0.5) %>% 
+  step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
+  #step_corr(all_numeric_predictors(), threshold = 0.8) %>% 
+  step_nzv(all_predictors(), freq_cut = 90/10) 
+
+simple_rec = recipe(LessThan10 ~ ., data = MSC_train) %>% 
+  #update_role(FarmID, Sampling, Test, GreaterLess, SampleTime, UneditConc, Conc,
+  #            new_role = "Non-predictor") %>% 
+  step_zv(all_predictors()) %>% 
+  step_normalize(all_numeric_predictors()) %>% 
+  step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
+  step_nzv(all_predictors(), freq_cut = 90/10) 
+
+MSC_recipe %>% prep() %>%  bake(NULL) %>% dim()
+
+# Set up specs for random forest and xgboost
+rf_spec = 
+   rand_forest(
+     trees = 1000,
+     min_n = tune(),
+     mtry = tune()
+     ) %>% 
+   set_engine("ranger") %>% 
+   set_mode("classification")
+
+xgb_spec =   
+  boost_tree(
+    trees = 1000,
+    min_n = tune(),
+    mtry = tune(),
+    tree_depth = tune(),
+    sample_size = tune(),
+    learn_rate = tune()
+  ) %>%
+  set_engine("xgboost") %>% 
+  set_mode("classification")
+
+nnet_spec =
+   mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>% 
+   set_engine("nnet", MaxNWts = 2600) %>% 
+   set_mode("classification")
+
+nnet_param = 
+   nnet_spec %>% 
+   extract_parameter_set_dials() %>% 
+   update(hidden_units = hidden_units(c(1, 27)))
+
+
+# Set up grid search for model training
+rf_grid = 
+  grid_max_entropy(
+    min_n(c(1L, 40L)),
+    mtry(c(1L, 50L)),
+    size = 40
+  )
+
+xgb_grid = 
+  grid_max_entropy(
+    tree_depth(c(1L, 10L)),
+    min_n(c(1L, 40L)),
+    mtry(c(1L, 50L)),
+    sample_prop(c(0.1, 1.0)),
+    learn_rate(c(-2, -1)),
+    size = 40
+  )
+
+# workflow set
+all_workflows = workflow_set(
+  preproc = list(pca = pca_rec,
+                 simple = simple_rec),
+  models = list(rf = rf_spec,
+                xgb = xgb_spec,
+                nnet = nnet_spec)
+)
+
+all_workflows = all_workflows %>% 
+   option_add(param_info = nnet_param, id = "pca_nnet") %>% 
+   option_add(param_info = nnet_param, id = "simple_nnet")
+
+# Parallel computing for model training
+library(finetune)
+
+race_ctrl <-
+   control_race(
+      save_pred = TRUE,
+      parallel_over = "everything",
+      save_workflow = TRUE
+   )
+
+race_results <-
+   all_workflows %>%
+   workflow_map(
+      "tune_race_anova",
+      seed = 1503,
+      resamples = MSC_folds,
+      grid = 40,
+      control = race_ctrl
+   )
+
+
+# Compare results from multiple models
+autoplot(
+   race_results,
+   #rank_metric = "accuracy",  
+   #metric = "accuracy",       
+   select_best = TRUE) +
+   geom_text(aes(y = mean - 0.1, label = wflow_id), angle = 90) 
+   #lims(y = c(3.0, 9.5)) +
+   #theme(legend.position = "none")
+
+
+best_results = 
+   race_results %>% 
+   extract_workflow_set_result("simple_rf") %>% 
+   select_best(metric = "accuracy")
+
+rf_test_results = race_results %>% 
+   extract_workflow("simple_rf") %>% 
+   finalize_workflow(best_results) %>% 
+   last_fit(split = MSC_split)
+
+rf_test_results %>% 
+   collect_predictions() %>% 
+   conf_mat(.pred_class, LessThan10)
+
+
+library(vip)
+imp_spec = rf_spec %>% 
+  finalize_model(best_results) %>% 
+  set_engine("ranger", importance = "permutation")
+
+workflow() %>% 
+  add_recipe(MSC_recipe) %>% 
+  add_model(imp_spec) %>% 
+  fit(MSC_train) %>% 
+  extract_fit_parsnip() %>% 
+  vip(geom = "point", num_features = 15)
+```
+
+
+
+
+
+
