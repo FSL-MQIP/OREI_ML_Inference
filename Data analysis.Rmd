@@ -32,7 +32,7 @@ surveyMicroData = merge(farmSurvey, microTest, by = c("FarmID", "Sampling"))
 
 # simplify column names
 colnames(surveyMicroData) = c("FarmID", "Sampling", "Loc", "University", "CertYear", "HouseStyle", 
-               "PastureTime", "StallNumPerArea", "CowNumPerArea", "StockDen", "Bedding", 
+               "PastureTime", "StallNumPerArea", "CowNumPerArea", "StockDen", "Bed", 
                "BedAdd","BedAddFreq", "StallCleanFreq", "CowNum", "MilkFreq", "PplNumPerWk",
                "PplNumPerShift", "NonFamEmp", "NonFamEmpNum", "FullEmp", "FullEmpNum",
                "PartEmp", "PartEmpNum", "Glove", "GloveFreq", "PreDip", "PreDipType",
@@ -75,7 +75,7 @@ surveyMicroData = surveyMicroData %>%
     DryMatPercent %in% c(">70%", "> 70%") ~ "> 70%")) %>% 
   ## Test
   mutate(Test = ifelse(Test == "MSC`", "MSC", Test)) %>% 
-  ## The frequency of adding bedding
+  ## The frequency of adding Bed
   mutate(BedAddFreq = case_when(
     BedAddFreq %in% c("<1x/day", "2x/week", "< 1x per day") ~ "< 1x per day",
     BedAddFreq %in% c("4x per day", "2x per day") ~ ">= 2x per day",
@@ -83,11 +83,11 @@ surveyMicroData = surveyMicroData %>%
   ## Bed additives
   mutate(BedAdd = if_else(BedAdd %in% c("ashes", "bacteria, limestone", "gypsum", "oyster shells"),
                           "Other", BedAdd)) %>% 
-  ## Bedding materials
-  mutate(Bedding = if_else(Bedding %in% c("Other inorganic", "Recycled sand", "Sand"),
-                           "Other inorganic", Bedding),
-         Bedding = if_else(Bedding %in% c("Sawdust", "Shavings"), 
-                           "Sawdust/shavings", Bedding)) %>% 
+  ## Bed materials
+  mutate(Bed = if_else(Bed %in% c("Other inorganic", "Recycled sand", "Sand"),
+                           "OtherInorg", Bed),
+         Bed = if_else(Bed %in% c("Sawdust", "Shavings"), 
+                           "Sawdust", Bed)) %>% 
   ## Bio feed additives
   mutate(BioFeedAdd = if_else(BioFeedAdd == "None", "None", "Other")) %>% 
   ## Cow milk location
@@ -176,7 +176,7 @@ surveyMicroData = full_join(surveyMicroData, SPCvar, by = c("FarmID"))
 
 ## Check summary stats for single variable
 #surveyMicroData %>% 
-#  group_by(Bedding) %>% 
+#  group_by(Bed) %>% 
 #  summarise(n = n()) %>% 
 #  mutate(freq = n/sum(n))
 ```
@@ -254,7 +254,7 @@ for (i in 1:nrow(surveyMicroData)){
 # combine the survey micro data set and the weather data set
 FarmData = merge(surveyMicroData, weatherData, by = c("FarmID", "SampleTime"))
 
-
+write.csv(FarmData, "FarmData.csv")
 #skim(FarmData)
 ```
 
@@ -265,7 +265,7 @@ FarmData = FarmData %>%
   filter(!is.na(Test) & !is.na(Conc)) %>% 
   mutate(Conc = ifelse(GreaterLess == "<", 0.25 * Conc, Conc))
 
-#skim(FarmData)
+skim(FarmData)
 
 # prepare the dataset for modeling
 
@@ -322,13 +322,15 @@ FarmData %>%
 
 ## spore count by type 
 FarmData %>% 
+  filter(Test %in% c("MSC", "TSC", "BAB")) %>% 
   ggplot(aes(x = log10(Conc), fill = Test)) +
   geom_histogram() +
   facet_wrap(vars(Test)) +
   theme_classic() +
-  labs(x = "log10 concentration per mL",
+  theme(legend.position = "none") +
+  labs(x = expression(paste(log[10], "CFU/mL or ", log[10], "MPN/mL")),
        y = "Frequency")
-ggsave("Summary plots/spore_count_dist.tiff", height = 4, width = 8, units = "in", dpi = "retina")
+ggsave("Manuscript/Fig1.tiff", height = 4, width = 8, units = "in", dpi = "retina")
 ```
 
 ## 4. ML for explorative analysis 
@@ -351,57 +353,436 @@ set.seed(1)
 MSCdata = FarmData %>% 
   filter(Test == "MSC") %>% 
   mutate(logConc = log10(Conc)) %>% 
-  select(-c(GreaterLess, Conc, FarmID, SampleTime, Sampling, University, Coop))
+  select(-c(GreaterLess, Conc, FarmID, SampleTime, Sampling, University, Coop, Loc))
 
-MSC_Parlor = MSCdata %>% 
-  filter(Parlor == "Yes")
+MSC_Parlor = MSCdata %>% filter(Parlor == "Yes")
 
-MSC_noParlor = MSCdata %>% 
-  filter(Parlor == "No")
+MSC_noParlor = MSCdata %>% filter(Parlor == "No")
 
-MSC_Pasture = MSCdata %>% 
-  filter(PastureTime != 0)
+MSC_Pasture = MSCdata %>% filter(PastureTime != 0)
 
-MSC_noPasture = MSCdata %>% 
-  filter(PastureTime == 0)
+MSC_noPasture = MSCdata %>% filter(PastureTime == 0)
+
+MSC_newFarm = MSCdata %>% filter(CertYear <= 9)
+
+MSC_oldFarm = MSCdata %>% filter(CertYear > 9)
 
 ## Susbet data for TSC
 TSCdata = FarmData %>% 
   filter(Test == "TSC") %>% 
   mutate(logConc = log10(Conc)) %>% 
-  select(-c(GreaterLess, Conc, FarmID, SampleTime, Sampling, University, Coop))
+  select(-c(GreaterLess, Conc, FarmID, SampleTime, Sampling, University, Coop, Loc))
 
-TSC_Parlor = TSCdata %>% 
-  filter(Parlor == "Yes")
+TSC_Parlor = TSCdata %>% filter(Parlor == "Yes")
 
-TSC_noParlor = TSCdata %>% 
-  filter(Parlor == "No")
+TSC_noParlor = TSCdata %>% filter(Parlor == "No")
 
-TSC_Pasture = TSCdata %>% 
-  filter(PastureTime != 0)
+TSC_Pasture = TSCdata %>% filter(PastureTime != 0)
 
-TSC_noPasture = TSCdata %>% 
-  filter(PastureTime == 0)
+TSC_noPasture = TSCdata %>% filter(PastureTime == 0)
+
+TSC_newFarm = TSCdata %>% filter(CertYear <= 9)
+
+TSC_oldFarm = TSCdata %>% filter(CertYear > 9)
 
 ## Susbet data for PSC
 PSCdata = FarmData %>% 
   filter(Test == "PSC") %>% 
   mutate(Pres = ifelse(GreaterLess == "<", 0, 1),
          Pres = as.factor(Pres)) %>% 
-  select(-c(GreaterLess, Conc, FarmID, SampleTime, Sampling, University, Coop))
+  select(-c(GreaterLess, Conc, FarmID, SampleTime, Sampling, University, Coop, Loc))
 
-PSC_Parlor = PSCdata %>% 
-  filter(Parlor == "Yes")
+PSC_Parlor = PSCdata %>% filter(Parlor == "Yes")
 
-PSC_noParlor = PSCdata %>% 
-  filter(Parlor == "No")
+PSC_noParlor = PSCdata %>% filter(Parlor == "No")
 
-PSC_Pasture = PSCdata %>% 
-  filter(PastureTime != 0)
+PSC_Pasture = PSCdata %>% filter(PastureTime != 0)
 
-PSC_noPasture = PSCdata %>% 
-  filter(PastureTime == 0)
+PSC_noPasture = PSCdata %>% filter(PastureTime == 0)
 
+PSC_newFarm = PSCdata %>% filter(CertYear <= 9)
+
+PSC_oldFarm = PSCdata %>% filter(CertYear > 9)
+
+## Susbet data for TSC
+BABdata = FarmData %>% 
+  filter(Test == "BAB") %>% 
+  mutate(logConc = log10(Conc)) %>% 
+  select(-c(GreaterLess, Conc, FarmID, SampleTime, Sampling, University, Coop, Loc))
+
+BAB_Parlor = BABdata %>% filter(Parlor == "Yes")
+
+BAB_noParlor = BABdata %>% filter(Parlor == "No")
+
+BAB_Pasture = BABdata %>% filter(PastureTime != 0)
+
+BAB_noPasture = BABdata %>% filter(PastureTime == 0)
+
+BAB_newFarm = BABdata %>% filter(CertYear <= 9)
+
+BAB_oldFarm = BABdata %>% filter(CertYear > 9)
+
+```
+
+### PCA for farm-size and weather variables
+```{r, eval=FALSE}
+spore_list = list(MSCdata, TSCdata, PSCdata, BABdata)
+weatherVars = c("tempmax","tempmin","temp","humidity","precip","precipcover","windgust",      
+             "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","humidity_1d",
+             "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
+             "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
+             "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
+             "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d")
+sizeVars = c("StockDen", "CowNum", "PplNumPerWk", "PplNumPerShift", "NonFamEmpNum", "FullEmpNum", "PartEmpNum")
+totalVars = names(MSCdata)
+pracVars = totalVars[! totalVars %in% c(weatherVars, sizeVars, "Loc", "Test")]
+
+rec = recipe(logConc ~ ., data = MSCdata) %>% 
+  step_zv(all_predictors()) %>% 
+  step_normalize(all_numeric_predictors()) %>%
+  step_pca(all_of(weatherVars), num_comp = 5, prefix = "weatherPC") %>%
+  step_pca(all_of(sizeVars), num_comp = 1, prefix = "sizePC") %>%
+  #step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
+  #step_pca(all_of(pracVars), num_comp = 7, prefix = "pracPC") %>% 
+  step_nzv(all_predictors(), freq_cut = 85/15)
+  
+pca_prep = prep(rec)
+
+weather_pca = tidy(pca_prep, 3)
+
+weather_pca %>%
+    filter(component %in% paste0("PC", 1:5)) %>%
+    mutate(component = fct_inorder(component)) %>%
+    ggplot(aes(value, terms, fill = terms)) +
+    geom_col(show.legend = FALSE) +
+    facet_wrap(~component, nrow = 1) +
+    labs(y = NULL) +
+    theme(axis.text.y = element_text(size = 5))
+ggsave("Figure/PCA/WeatherPC.tiff", height = 4, width = 8, units = "in", dpi = "retina")
+
+weather_pca %>%
+    filter(component %in% paste0("PC", 1:5)) %>%
+    group_by(component) %>%
+    top_n(8, abs(value)) %>%
+    ungroup() %>%
+    mutate(terms = reorder_within(terms, abs(value), component)) %>%
+    ggplot(aes(abs(value), terms, fill = value > 0)) +
+    geom_col() +
+    facet_wrap(~component, scales = "free_y") +
+    scale_y_reordered() +
+    labs(
+      x = "Absolute value of contribution",
+      y = NULL, fill = "Positive?"
+    )
+ggsave("Figure/PCA/WeatherPC_top5.tiff", height = 4, width = 8, units = "in", dpi = "retina")
+    
+sdev = pca_prep$steps[[3]]$res$sdev
+percent_variation = sdev^2 / sum(sdev^2)
+var_df = data.frame(PC=paste0("PC",1:length(sdev)),
+                       var_explained=percent_variation,
+                       stringsAsFactors = FALSE)
+    
+Weather_top5 = var_df[1:5, 2]
+Weather_top5
+    
+size_pca = tidy(pca_prep, 4)
+
+size_pca %>%
+    filter(component %in% paste0("PC", 1:5)) %>%
+    mutate(component = fct_inorder(component)) %>%
+    ggplot(aes(value, terms, fill = terms)) +
+    geom_col(show.legend = FALSE) +
+    facet_wrap(~component, nrow = 1) +
+    labs(y = NULL) +
+    theme(axis.text.y = element_text(size = 5))
+ggsave("Figure/PCA/FarmSizePC.tiff", height = 4, width = 8, units = "in", dpi = "retina")
+
+size_pca %>%
+    filter(component %in% paste0("PC", 1:5)) %>%
+    group_by(component) %>%
+    top_n(8, abs(value)) %>%
+    ungroup() %>%
+    mutate(terms = reorder_within(terms, abs(value), component)) %>%
+    ggplot(aes(abs(value), terms, fill = value > 0)) +
+    geom_col() +
+    facet_wrap(~component, scales = "free_y") +
+    scale_y_reordered() +
+    labs(
+      x = "Absolute value of contribution",
+      y = NULL, fill = "Positive?"
+    )
+ggsave("Figure/PCA/FarmSizePC_top5.tiff", height = 4, width = 8, units = "in", dpi = "retina")
+    
+sdev = pca_prep$steps[[4]]$res$sdev
+percent_variation = sdev^2 / sum(sdev^2)
+var_df = data.frame(PC=paste0("PC",1:length(sdev)),
+                       var_explained=percent_variation,
+                       stringsAsFactors = FALSE)
+    
+FarmSize_top5 = var_df[1:5, 2]
+FarmSize_top5
+
+
+MSC_prac = MSCdata %>% select(all_of(pracVars))
+rec_prac = recipe(logConc ~ ., data = MSC_prac) %>% 
+  step_zv(all_predictors()) %>% 
+  step_normalize(all_numeric_predictors()) %>%
+  step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
+  step_pca(all_predictors(), num_comp = 7, prefix = "pracPC") %>% 
+  step_nzv(all_predictors(), freq_cut = 85/15)
+
+pca_prep = prep(rec_prac)
+
+prac_pca = tidy(pca_prep, 4)
+
+prac_pca %>%
+    filter(component %in% paste0("PC", 1:5)) %>%
+    mutate(component = fct_inorder(component)) %>%
+    ggplot(aes(value, terms, fill = terms)) +
+    geom_col(show.legend = FALSE) +
+    facet_wrap(~component, nrow = 1) +
+    labs(y = NULL) +
+    theme(axis.text.y = element_text(size = 5))
+ggsave("Figure/PCA/PracPC.tiff", height = 4, width = 8, units = "in", dpi = "retina")
+
+prac_pca %>%
+    filter(component %in% paste0("PC", 1:5)) %>%
+    group_by(component) %>%
+    top_n(8, abs(value)) %>%
+    ungroup() %>%
+    mutate(terms = reorder_within(terms, abs(value), component)) %>%
+    ggplot(aes(abs(value), terms, fill = value > 0)) +
+    geom_col() +
+    facet_wrap(~component, scales = "free_y") +
+    scale_y_reordered() +
+    labs(
+      x = "Absolute value of contribution",
+      y = NULL, fill = "Positive?"
+    )
+ggsave("Figure/PCA/PracPC_top5.tiff", height = 4, width = 8, units = "in", dpi = "retina")
+    
+sdev = pca_prep$steps[[4]]$res$sdev
+percent_variation = sdev^2 / sum(sdev^2)
+var_df = data.frame(PC=paste0("PC",1:length(sdev)),
+                       var_explained=percent_variation,
+                       stringsAsFactors = FALSE)
+Prac_top5 = var_df[1:5, 2]
+Prac_top5
+```
+### decision tree
+```{r, eval=FALSE}
+library(rpart.plot)
+library(rattle)
+library(party)
+
+
+set.seed(1)
+varToRemove = c("tempmax","tempmin","temp","humidity","precip","windgust",      
+             "windspeed","solarradiation","tempmax_1d","tempmin_1d",
+             "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
+             "tempmin_2d","temp_2d", "humidity_2d","precip_2d","windgust_2d","windspeed_2d",
+             "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
+             "precipcover_3d",  "windspeed_3d","solarradiation_3d","SPCvar","CowNum", "PplNumPerShift","PartEmpNum", 
+             "Loc", "CertYear")
+varToRemove = c(weatherVars, "SPCvar","CowNum", "PplNumPerShift","PartEmpNum", "Loc", "CertYear")
+### MSC
+MSC_recipe = recipe(logConc ~ ., data = MSC_oldFarm) %>% 
+  step_zv(all_predictors()) %>% 
+  update_role(all_of(varToRemove), 
+             new_role = "non-predictors") %>% 
+  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
+  step_nzv(all_predictors(), freq_cut = 85/15) 
+
+MSC_postprocess = MSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
+
+MSC_oldFarm_tree_fit = rpart(logConc ~., data = MSC_postprocess)
+printcp(MSC_oldFarm_tree_fit)
+MSC_oldFarm_tree_pfit =  rpart::prune(MSC_oldFarm_tree_fit,
+                               cp = MSC_oldFarm_tree_fit$cptable[which.min(MSC_oldFarm_tree_fit$cptable[,"xerror"]),"CP"])
+
+rpart.plot(MSC_oldFarm_tree_pfit, cex = 0.7, roundint=FALSE)
+
+
+MSC_recipe = recipe(logConc ~ ., data = MSC_newFarm) %>% 
+  step_zv(all_predictors()) %>% 
+  update_role(all_of(varToRemove), 
+             new_role = "non-predictors") %>% 
+  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
+  step_nzv(all_predictors(), freq_cut = 85/15) 
+
+MSC_postprocess = MSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
+
+MSC_newFarm_tree_fit = rpart(logConc ~., data = MSC_postprocess)
+printcp(MSC_newFarm_tree_fit)
+MSC_newFarm_tree_pfit =  rpart::prune(MSC_newFarm_tree_fit,
+                               cp = MSC_newFarm_tree_fit$cptable[which.min(MSC_newFarm_tree_fit$cptable[,"xerror"]),"CP"])
+
+rpart.plot(MSC_newFarm_tree_pfit, cex = 0.7, roundint=FALSE)
+
+MSC_recipe = recipe(logConc ~ ., data = MSCdata) %>% 
+  step_zv(all_predictors()) %>% 
+  update_role(all_of(varToRemove), 
+             new_role = "non-predictors") %>% 
+  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
+  step_nzv(all_predictors(), freq_cut = 85/15) 
+
+MSC_postprocess = MSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
+
+MSC_all_tree_fit = rpart(logConc ~., data = MSC_postprocess)
+printcp(MSC_all_tree_fit)
+MSC_all_tree_pfit =  rpart::prune(MSC_all_tree_fit,
+                               cp = MSC_all_tree_fit$cptable[which.min(MSC_all_tree_fit$cptable[,"xerror"]),"CP"])
+
+rpart.plot(MSC_all_tree_pfit, cex = 0.7, roundint=FALSE)
+
+
+### TSC
+TSC_recipe = recipe(logConc ~ ., data = TSC_oldFarm) %>% 
+  step_zv(all_predictors()) %>% 
+  update_role(all_of(varToRemove), 
+             new_role = "non-predictors") %>% 
+  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
+  step_nzv(all_predictors(), freq_cut = 85/15) 
+
+TSC_postprocess = TSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
+
+TSC_oldFarm_tree_fit = rpart(logConc ~., data = TSC_postprocess)
+printcp(TSC_oldFarm_tree_pfit)
+TSC_oldFarm_tree_pfit =  rpart::prune(TSC_oldFarm_tree_fit,
+                               cp = TSC_oldFarm_tree_fit$cptable[which.min(TSC_oldFarm_tree_fit$cptable[,"xerror"]),"CP"])
+
+rpart.plot(TSC_oldFarm_tree_fit, cex = 0.7, roundint=FALSE)
+
+TSC_recipe = recipe(logConc ~ ., data = TSC_newFarm) %>% 
+  step_zv(all_predictors()) %>% 
+  update_role(all_of(varToRemove), 
+             new_role = "non-predictors") %>% 
+  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
+  step_nzv(all_predictors(), freq_cut = 85/15) 
+
+TSC_postprocess = TSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
+
+TSC_newFarm_tree_fit = rpart(logConc ~., data = TSC_postprocess)
+printcp(TSC_newFarm_tree_fit)
+TSC_newFarm_tree_pfit =  rpart::prune(TSC_newFarm_tree_fit,
+                               cp = TSC_newFarm_tree_fit$cptable[which.min(TSC_newFarm_tree_fit$cptable[,"xerror"]),"CP"])
+
+rpart.plot(TSC_newFarm_tree_pfit, cex = 0.7, roundint=FALSE)
+
+TSC_recipe = recipe(logConc ~ ., data = TSCdata) %>% 
+  step_zv(all_predictors()) %>% 
+  update_role(all_of(varToRemove), 
+             new_role = "non-predictors") %>% 
+  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
+  step_nzv(all_predictors(), freq_cut = 85/15) 
+
+TSC_postprocess = TSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
+
+TSC_all_tree_fit = rpart(logConc ~., data = TSC_postprocess)
+printcp(TSC_all_tree_fit)
+TSC_all_tree_pfit =  rpart::prune(TSC_all_tree_fit,
+                               cp = TSC_all_tree_fit$cptable[which.min(TSC_all_tree_fit$cptable[,"xerror"]),"CP"])
+
+rpart.plot(TSC_all_tree_pfit, cex = 0.7, roundint=FALSE)
+
+### PSC
+PSC_recipe = recipe(Pres ~ ., data = PSC_oldFarm) %>% 
+  step_zv(all_predictors()) %>% 
+  update_role(all_of(varToRemove), 
+             new_role = "non-predictors") %>% 
+  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
+  step_nzv(all_predictors(), freq_cut = 85/15) 
+
+PSC_postprocess = PSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
+
+PSC_oldFarm_tree_fit = rpart(Pres ~., data = PSC_postprocess)
+printcp(PSC_oldFarm_tree_fit)
+PSC_oldFarm_tree_pfit =  rpart::prune(PSC_oldFarm_tree_fit,
+                               cp = PSC_oldFarm_tree_fit$cptable[which.min(PSC_oldFarm_tree_fit$cptable[,"xerror"]),"CP"])
+
+rpart.plot(PSC_oldFarm_tree_pfit, cex = 0.7, roundint=FALSE)
+
+PSC_recipe = recipe(Pres ~ ., data = PSC_newFarm) %>% 
+  step_zv(all_predictors()) %>% 
+  update_role(all_of(varToRemove), 
+             new_role = "non-predictors") %>% 
+  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
+  step_nzv(all_predictors(), freq_cut = 85/15) 
+
+PSC_postprocess = PSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
+
+PSC_newFarm_tree_fit = rpart(Pres ~., data = PSC_postprocess)
+printcp(PSC_newFarm_tree_fit)
+PSC_newFarm_tree_pfit =  rpart::prune(PSC_newFarm_tree_fit,
+                               cp = PSC_newFarm_tree_fit$cptable[which.min(PSC_newFarm_tree_fit$cptable[,"xerror"]),"CP"])
+
+rpart.plot(PSC_newFarm_tree_pfit, cex = 0.7, roundint=FALSE)
+
+PSC_recipe = recipe(Pres ~ ., data = PSCdata) %>% 
+  step_zv(all_predictors()) %>% 
+  update_role(all_of(varToRemove), 
+             new_role = "non-predictors") %>% 
+  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
+  step_nzv(all_predictors(), freq_cut = 85/15) 
+
+PSC_postprocess = PSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
+
+PSC_all_tree_fit = rpart(Pres ~., data = PSC_postprocess)
+printcp(PSC_all_tree_fit)
+PSC_all_tree_pfit =  rpart::prune(PSC_all_tree_fit,
+                               cp = PSC_all_tree_fit$cptable[which.min(PSC_all_tree_fit$cptable[,"xerror"]),"CP"])
+
+rpart.plot(PSC_all_tree_pfit, cex = 0.7, roundint=FALSE)
+
+
+### BAB
+BAB_recipe = recipe(logConc ~ ., data = BAB_oldFarm) %>% 
+  step_zv(all_predictors()) %>% 
+  update_role(all_of(varToRemove), 
+             new_role = "non-predictors") %>% 
+  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
+  step_nzv(all_predictors(), freq_cut = 85/15) 
+
+BAB_postprocess = BAB_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
+
+BAB_oldFarm_tree_fit = rpart(logConc ~., data = BAB_postprocess)
+printcp(BAB_oldFarm_tree_fit)
+BAB_oldFarm_tree_pfit =  rpart::prune(BAB_oldFarm_tree_fit,
+                               cp = BAB_oldFarm_tree_fit$cptable[which.min(BAB_oldFarm_tree_fit$cptable[,"xerror"]),"CP"])
+
+rpart.plot(BAB_oldFarm_tree_pfit, cex = 0.7, roundint=FALSE)
+
+BAB_recipe = recipe(logConc ~ ., data = BAB_newFarm) %>% 
+  step_zv(all_predictors()) %>% 
+  update_role(all_of(varToRemove), 
+             new_role = "non-predictors") %>% 
+  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
+  step_nzv(all_predictors(), freq_cut = 85/15) 
+
+BAB_postprocess = BAB_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
+
+BAB_newFarm_tree_fit = rpart(logConc ~., data = BAB_postprocess)
+printcp(BAB_newFarm_tree_fit)
+BAB_newFarm_tree_pfit =  rpart::prune(BAB_newFarm_tree_fit,
+                               cp = BAB_newFarm_tree_fit$cptable[which.min(BAB_newFarm_tree_fit$cptable[,"xerror"]),"CP"])
+
+rpart.plot(BAB_newFarm_tree_pfit, cex = 0.7, roundint=FALSE)
+
+BAB_recipe = recipe(logConc ~ ., data = BABdata) %>% 
+  step_zv(all_predictors()) %>% 
+  update_role(all_of(varToRemove), 
+             new_role = "non-predictors") %>% 
+  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
+  step_nzv(all_predictors(), freq_cut = 85/15) 
+
+BAB_postprocess = BAB_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
+
+BAB_all_tree_fit = rpart(logConc ~., data = BAB_postprocess)
+printcp(BAB_all_tree_fit)
+BAB_all_tree_pfit =  rpart::prune(BAB_all_tree_fit,
+                               cp = BAB_all_tree_fit$cptable[which.min(BAB_all_tree_fit$cptable[,"xerror"]),"CP"])
+
+rpart.plot(BAB_all_tree_pfit, cex = 0.7, roundint=FALSE)
 ```
 
 ### helper
@@ -455,13 +836,13 @@ ggplot_pdp_cat <- function(obj, x) {
 ```
 
 ### MSC
-```{r, eval=FALSE}
+```{r}
 set.seed(1)
 
-MSC_list = list(MSCdata, MSC_Parlor, MSC_noParlor, MSC_Pasture, MSC_noPasture)
-subset_names = c("All", "Parlor", "noParlor", "Pasture", "noPasture")
+MSC_list = list(MSCdata, MSC_Parlor, MSC_noParlor, MSC_Pasture, MSC_noPasture, MSC_oldFarm, MSC_newFarm)
+subset_names = c("All", "Parlor","noParlor","Pasture","noPasture","oldFarm", "newFarm")
 MSC_rs_paras = tibble()
-MSC_PCA_explained = data.frame(matrix(NA, ncol = 5, nrow = 5)) 
+MSC_PCA_explained = data.frame(matrix(NA, ncol = 7, nrow = 5)) 
 names(MSC_PCA_explained) = subset_names
 
 ## Model formula
@@ -475,7 +856,7 @@ for (i in 1:length(MSC_list)){
              "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
              "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
              "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), num_comp = 5) %>%
-    step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>% 
+    step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
     step_nzv(all_predictors(), freq_cut = 85/15) 
 
   rf_spec = rand_forest(
@@ -578,9 +959,8 @@ save(MSC_PCA_explained, file = "Results/MSC_PCA_results.RData")
 ```
 
 
-
-##### partial dependence plot for MSC data
-```{r}
+#### partial dependence plot for MSC data
+```{r, eval=FALSE}
 library(pdp)
 library(cowplot)
 library(DALEXtra)
@@ -595,15 +975,193 @@ source("Scripts/MSC_noPasture_PDP.R")
 
 ```
 
-
-### TSC
+#### Linear regression for intervention strategies
 ```{r, eval=FALSE}
 set.seed(1)
 
-TSC_list = list(TSCdata, TSC_Parlor, TSC_noParlor, TSC_Pasture, TSC_noPasture)
-subset_names = c("All", "Parlor", "noParlor", "Pasture", "noPasture")
+MSC_recipe = recipe(logConc ~ ., data = MSCdata) %>% 
+    step_zv(all_predictors()) %>% 
+    step_normalize(all_numeric_predictors()) %>%
+    update_role(c("tempmax","tempmin","temp","humidity","precip","precipcover","windgust",      
+             "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","humidity_1d",
+             "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
+             "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
+             "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
+             "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d",
+             "CertYear","Loc", "SPCvar", "CowNum","PplNumPerWk", "PplNumPerShift", "NonFamEmpNum",
+             "FullEmpNum", "PartEmpNum"), new_role = "non-predictors") %>% 
+    #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>% 
+    step_nzv(all_predictors(), freq_cut = 85/15) 
+
+rf_spec = rand_forest(
+     trees = 1000,
+     min_n = tune(),
+     mtry = tune()) %>% 
+     set_engine("ranger") %>% 
+     set_mode("regression")
+  
+dimension = MSC_recipe %>% prep() %>% bake(NULL) %>% dim()
+nVar = dimension[2] - 1
+  
+rf_grid = grid_max_entropy(
+    min_n(c(1L, 40L)),
+    mtry(c(1L, 56)),
+    size = 40
+)
+  
+MSC_wf = workflow() %>% 
+    add_recipe(MSC_recipe) %>% 
+    add_model(rf_spec)
+  
+MSC_folds = vfold_cv(MSCdata, strata = logConc, v = 3)
+  
+MSC_rs = tune_grid(
+    MSC_wf,
+    MSC_folds,
+    grid = rf_grid,
+    metrics = metric_set(rsq),
+    control = control_grid(verbose = FALSE)
+)
+  
+best_rs = show_best(MSC_rs, metric = "rsq")
+best_rs
+  
+imp_spec = rf_spec %>% 
+    finalize_model(select_best(MSC_rs, "rsq")) %>% 
+    set_engine("ranger", importance = "permutation")
+
+vip_plot = workflow() %>% 
+      add_recipe(MSC_recipe) %>% 
+      add_model(imp_spec) %>% 
+      fit(MSCdata) %>% 
+      extract_fit_parsnip() %>% 
+      vip(geom = "point", num_features = 10)
+vip_plot
+
+library(glmnet)
+MSC_lm_fit = lm(logConc ~ HouseStyle + Parlor + CowMilkLoc + CowWaitMilk + TowelType + ParlorHose + ClipFlame +
+                  ParlorManScrap + TowelDeter + StockDen + PastureTime, data = MSCdata)
+
+X = MSCdata %>% select(-logConc, -all_of(varToRemove))
+Y = MSCdata %>% pull(logConc)
+MSC_lasso_fit = glmnet(x = X, y = Y, alpha = 1)
+
+# all data
+MSC_lm_fit_all = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = MSCdata)
+summary(MSC_lm_fit_all)
+
+# Parlor
+MSC_lm_fit_Parlor = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = MSC_Parlor)
+summary(MSC_lm_fit_Parlor)
+
+# No Parlor
+MSC_lm_fit_noParlor = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = MSC_noParlor)
+summary(MSC_lm_fit_noParlor)
+
+
+# Pasture
+MSC_lm_fit_Pasture = lm(logConc ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = MSC_Pasture)
+summary(MSC_lm_fit_Pasture)
+
+# No Pasture
+MSC_lm_fit_noPasture = lm(logConc ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + 
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = MSC_noPasture)
+summary(MSC_lm_fit_noPasture)
+```
+
+### residuals
+```{r, eval=FALSE}
+# all data
+MSC_lm_fit_all_id = lm(logConc ~  
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data = MSCdata)
+#summary(MSC_lm_fit_all_id)
+
+MSC_res_fit_all = lm(MSC_lm_fit_all_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = MSCdata)
+summary(MSC_res_fit_all)
+
+# Parlor
+MSC_lm_fit_Parlor_id = lm(logConc ~ 
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data = MSC_Parlor)
+
+MSC_res_fit_Parlor = lm(MSC_lm_fit_Parlor_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = MSC_Parlor)
+summary(MSC_res_fit_Parlor)
+
+# No Parlor
+MSC_lm_fit_noParlor_id = lm(logConc ~  
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data = MSC_noParlor)
+
+MSC_res_fit_noParlor = lm(MSC_lm_fit_noParlor_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = MSC_noParlor)
+summary(MSC_res_fit_noParlor)
+
+
+# Pasture
+MSC_lm_fit_Pasture_id = lm(logConc ~  
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data = MSC_Pasture)
+
+MSC_res_fit_Pasture = lm(MSC_lm_fit_Pasture_id$residuals ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = MSC_Pasture)
+summary(MSC_res_fit_Pasture)
+
+# No Pasture
+MSC_lm_fit_noPasture_id = lm(logConc ~ 
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data = MSC_noPasture)
+
+MSC_res_fit_noPasture = lm(MSC_lm_fit_noPasture_id$residuals ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + 
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = MSC_noPasture)
+summary(MSC_res_fit_noPasture)
+```
+
+
+### TSC
+```{r}
+set.seed(1)
+
+TSC_list = list(TSCdata, TSC_Parlor, TSC_noParlor, TSC_Pasture, TSC_noPasture, TSC_oldFarm, TSC_newFarm)
+subset_names = c("All", "Parlor","noParlor","Pasture","noPasture","oldFarm", "newFarm")
 TSC_rs_paras = tibble()
-TSC_PCA_explained = data.frame(matrix(NA, ncol = 5, nrow = 5)) 
+TSC_PCA_explained = data.frame(matrix(NA, ncol = 7, nrow = 5)) 
 names(TSC_PCA_explained) = subset_names
 
 ## Model formula
@@ -617,7 +1175,7 @@ for (i in 1:length(TSC_list)){
              "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
              "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
              "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), num_comp = 5) %>%
-    step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>% 
+    step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
     step_nzv(all_predictors(), freq_cut = 85/15) 
 
   rf_spec = rand_forest(
@@ -718,9 +1276,117 @@ save(TSC_rs_paras, file = "Results/TSC_results.RData")
 save(TSC_PCA_explained, file = "Results/TSC_PCA_results.RData")
 ```
 
+### linear regression
+```{r, eval=FALSE}
+# all data
+TSC_lm_fit_all = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = TSCdata)
+summary(TSC_lm_fit_all)
+
+# parlor
+TSC_lm_fit_Parlor = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = TSC_Parlor)
+summary(TSC_lm_fit_Parlor)
+
+# no parlor
+TSC_lm_fit_noParlor = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = TSC_noParlor)
+summary(TSC_lm_fit_noParlor)
+
+# pasture
+TSC_lm_fit_Pasture = lm(logConc ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = TSC_Pasture)
+summary(TSC_lm_fit_Pasture)
+
+# no pasture
+TSC_lm_fit_noPasture = lm(logConc ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + FeedPurchase +
+                  ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+ TowelMacDry, 
+                  data = TSC_noPasture)
+summary(TSC_lm_fit_noPasture)
+
+```
+
+### residual lm
+```{r, eval=FALSE}
+# all data
+ TSC_lm_fit_all_id = lm(logConc ~  
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data =  TSCdata)
+
+ TSC_res_fit_all = lm( TSC_lm_fit_all_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data =  TSCdata)
+summary( TSC_res_fit_all)
+
+# Parlor
+ TSC_lm_fit_Parlor_id = lm(logConc ~ 
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data =  TSC_Parlor)
+
+ TSC_res_fit_Parlor = lm( TSC_lm_fit_Parlor_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data =  TSC_Parlor)
+summary( TSC_res_fit_Parlor)
+
+# No Parlor
+ TSC_lm_fit_noParlor_id = lm(logConc ~  
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data =  TSC_noParlor)
+
+ TSC_res_fit_noParlor = lm( TSC_lm_fit_noParlor_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data =  TSC_noParlor)
+summary( TSC_res_fit_noParlor)
+
+
+# Pasture
+ TSC_lm_fit_Pasture_id = lm(logConc ~  
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data =  TSC_Pasture)
+
+ TSC_res_fit_Pasture = lm( TSC_lm_fit_Pasture_id$residuals ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data =  TSC_Pasture)
+summary( TSC_res_fit_Pasture)
+
+# No Pasture
+ TSC_lm_fit_noPasture_id = lm(logConc ~ 
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data =  TSC_noPasture)
+
+ TSC_res_fit_noPasture = lm( TSC_lm_fit_noPasture_id$residuals ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + 
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data =  TSC_noPasture)
+summary( TSC_res_fit_noPasture)
+```
+
 
 ### pdp for TSC
-```{r}
+```{r, eval=FALSE}
 source("Scripts/TSCdata_PDP.R")
 source("Scripts/TSC_Parlor_PDP.R")
 source("Scripts/TSC_noParlor_PDP.R")
@@ -730,13 +1396,13 @@ source("Scripts/TSC_noPasture_PDP.R")
 
 
 ### PSC
-```{r, eval=FALSE}
+```{r}
 set.seed(1)
 
-PSC_list = list(PSCdata, PSC_Parlor, PSC_noParlor, PSC_Pasture, PSC_noPasture)
-subset_names = c("All", "Parlor", "noParlor", "Pasture", "noPasture")
+PSC_list = list(PSCdata, PSC_Parlor, PSC_noParlor, PSC_Pasture, PSC_noPasture, PSC_oldFarm, PSC_newFarm)
+subset_names = c("All", "Parlor","noParlor","Pasture","noPasture","oldFarm", "newFarm")
 PSC_rs_paras = tibble()
-PSC_PCA_explained = data.frame(matrix(NA, ncol = 5, nrow = 5)) 
+PSC_PCA_explained = data.frame(matrix(NA, ncol = 7, nrow = 5)) 
 names(PSC_PCA_explained) = subset_names
 
 ## Model formula
@@ -750,7 +1416,7 @@ for (i in 1:length(PSC_list)){
              "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
              "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
              "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), num_comp = 5) %>%
-    step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>% 
+    step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
     step_nzv(all_predictors(), freq_cut = 85/15) %>% 
     step_smotenc(Pres)
 
@@ -852,9 +1518,134 @@ save(PSC_rs_paras, file = "Results/PSC_results.RData")
 save(PSC_PCA_explained, file = "Results/PSC_PCA_results.RData")
 ```
 
+### linear regression
+```{r, eval=FALSE}
+PSCdata = FarmData %>% 
+  filter(Test == "PSC") %>% 
+  mutate(logConc = log10(Conc)) %>% 
+  select(-c(GreaterLess, Conc, FarmID, SampleTime, Sampling, University, Coop))
+
+PSC_Parlor = PSCdata %>% 
+  filter(Parlor == "Yes")
+
+PSC_noParlor = PSCdata %>% 
+  filter(Parlor == "No")
+
+PSC_Pasture = PSCdata %>% 
+  filter(PastureTime != 0)
+
+PSC_noPasture = PSCdata %>% 
+  filter(PastureTime == 0)
+
+
+# all data
+PSC_lm_fit_all = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = PSCdata)
+summary(PSC_lm_fit_all)
+
+# parlor
+PSC_lm_fit_Parlor = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = PSC_Parlor)
+summary(PSC_lm_fit_Parlor)
+
+# no parlor
+PSC_lm_fit_noParlor = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = PSC_noParlor)
+summary(PSC_lm_fit_noParlor)
+
+# pasture
+PSC_lm_fit_Pasture = lm(logConc ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = PSC_Pasture)
+summary(PSC_lm_fit_Pasture)
+
+# no pasture
+PSC_lm_fit_noPasture = lm(logConc ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + FeedPurchase +
+                  ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+ TowelMacDry, 
+                  data = PSC_noPasture)
+summary(PSC_lm_fit_noPasture)
+```
+
+### residuals lm 
+```{r, eval=FALSE}
+# all data
+ PSC_lm_fit_all_id = lm(logConc ~  
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data =  PSCdata)
+
+ PSC_res_fit_all = lm( PSC_lm_fit_all_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data =  PSCdata)
+summary( PSC_res_fit_all)
+
+# Parlor
+ PSC_lm_fit_Parlor_id = lm(logConc ~ 
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data =  PSC_Parlor)
+
+ PSC_res_fit_Parlor = lm( PSC_lm_fit_Parlor_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data =  PSC_Parlor)
+summary( PSC_res_fit_Parlor)
+
+# No Parlor
+ PSC_lm_fit_noParlor_id = lm(logConc ~  
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data =  PSC_noParlor)
+
+ PSC_res_fit_noParlor = lm( PSC_lm_fit_noParlor_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data =  PSC_noParlor)
+summary( PSC_res_fit_noParlor)
+
+
+# Pasture
+ PSC_lm_fit_Pasture_id = lm(logConc ~  
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data =  PSC_Pasture)
+
+ PSC_res_fit_Pasture = lm( PSC_lm_fit_Pasture_id$residuals ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data =  PSC_Pasture)
+summary( PSC_res_fit_Pasture)
+
+# No Pasture
+ PSC_lm_fit_noPasture_id = lm(logConc ~ 
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data =  PSC_noPasture)
+
+ PSC_res_fit_noPasture = lm( PSC_lm_fit_noPasture_id$residuals ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + 
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data =  PSC_noPasture)
+summary( PSC_res_fit_noPasture)
+```
+
 
 ### pdp for PSC
-```{r}
+```{r, eval=FALSE}
 source("Scripts/PSCdata_PDP.R")
 source("Scripts/PSC_Parlor_PDP.R")
 source("Scripts/PSC_noParlor_PDP.R")
@@ -863,9 +1654,244 @@ source("Scripts/PSC_noPasture_PDP.R")
 ```
 
 
+### BAB
+```{r}
+set.seed(1)
+
+BAB_list = list(BABdata, BAB_Parlor, BAB_noParlor, BAB_Pasture, BAB_noPasture, BAB_oldFarm, BAB_newFarm)
+subset_names = c("All", "Parlor","noParlor","Pasture","noPasture","oldFarm", "newFarm")
+BAB_rs_paras = tibble()
+BAB_PCA_explained = data.frame(matrix(NA, ncol = 7, nrow = 5)) 
+names(BAB_PCA_explained) = subset_names
+
+## Model formula
+for (i in 1:length(BAB_list)){
+  BAB_recipe = recipe(logConc ~ ., data = BAB_list[[i]]) %>% 
+    step_zv(all_predictors()) %>% 
+    step_normalize(all_numeric_predictors()) %>%
+    step_pca(c("tempmax","tempmin","temp","humidity","precip","precipcover","windgust",      
+             "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","humidity_1d",
+             "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
+             "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
+             "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
+             "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), num_comp = 5) %>%
+    step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
+    step_nzv(all_predictors(), freq_cut = 85/15) 
+
+  rf_spec = rand_forest(
+     trees = 1000,
+     min_n = tune(),
+     mtry = tune()) %>% 
+     set_engine("ranger") %>% 
+     set_mode("regression")
+  
+  dimension = BAB_recipe %>% prep() %>% bake(NULL) %>% dim()
+  nVar = dimension[2]
+  
+  rf_grid = grid_max_entropy(
+    min_n(c(1L, 40L)),
+    mtry(c(1L, nVar)),
+    size = 40
+  )
+  
+  BAB_wf = workflow() %>% 
+    add_recipe(BAB_recipe) %>% 
+    add_model(rf_spec)
+  
+  BAB_folds = vfold_cv(BAB_list[[i]], strata = logConc, v = 3)
+  
+  BAB_rs = tune_grid(
+    BAB_wf,
+    BAB_folds,
+    grid = rf_grid,
+    metrics = metric_set(rsq),
+    control = control_grid(verbose = FALSE)
+  )
+  
+  best_rs = show_best(BAB_rs, metric = "rsq")
+  best_rs_paras = best_rs %>% slice(1) %>% mutate(dataset = subset_names[i])
+  BAB_rs_paras = bind_rows(best_rs_paras, BAB_rs_paras)
+  
+  imp_spec = rf_spec %>% 
+    finalize_model(select_best(BAB_rs, "rsq")) %>% 
+    set_engine("ranger", importance = "permutation")
+
+  vip_plot = workflow() %>% 
+      add_recipe(BAB_recipe) %>% 
+      add_model(imp_spec) %>% 
+      fit(BAB_list[[i]]) %>% 
+      extract_fit_parsnip() %>% 
+      vip(geom = "point", num_features = 15)
+  
+  file_name = paste0("Figure/BAB/BAB_VIP_", subset_names[i], ".tiff")
+  ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
+  
+  pca_prep = prep(BAB_recipe)
+
+  tidied_pca = tidy(pca_prep, 3)
+
+  tidied_pca %>%
+    filter(component %in% paste0("PC", 1:5)) %>%
+    mutate(component = fct_inorder(component)) %>%
+    ggplot(aes(value, terms, fill = terms)) +
+    geom_col(show.legend = FALSE) +
+    facet_wrap(~component, nrow = 1) +
+    labs(y = NULL) +
+    theme(axis.text.y = element_text(size = 5))
+  file_name = paste0("Figure/BAB/BAB_PCA_", subset_names[i], ".tiff")
+  ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
+
+  tidied_pca %>%
+    filter(component %in% paste0("PC", 1:5)) %>%
+    group_by(component) %>%
+    top_n(8, abs(value)) %>%
+    ungroup() %>%
+    mutate(terms = reorder_within(terms, abs(value), component)) %>%
+    ggplot(aes(abs(value), terms, fill = value > 0)) +
+    geom_col() +
+    facet_wrap(~component, scales = "free_y") +
+    scale_y_reordered() +
+    labs(
+      x = "Absolute value of contribution",
+      y = NULL, fill = "Positive?"
+    )
+    file_name = paste0("Figure/BAB/BAB_PCA_top_", subset_names[i], ".tiff")
+    ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
+    
+    sdev = pca_prep$steps[[3]]$res$sdev
+    percent_variation = sdev^2 / sum(sdev^2)
+    var_df = data.frame(PC=paste0("PC",1:length(sdev)),
+                       var_explained=percent_variation,
+                       stringsAsFactors = FALSE)
+    
+    top5 = var_df[1:5, 2]
+    BAB_PCA_explained[,i] = top5    
+
+}
+
+BAB_rs_paras
+BAB_PCA_explained
+
+save(BAB_rs_paras, file = "Results/BAB_results.RData")
+save(BAB_PCA_explained, file = "Results/BAB_PCA_results.RData")
+```
+
+## linear regression
+```{r, eval=FALSE}
+# all data
+BAB_lm_fit_all = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = BABdata)
+summary(BAB_lm_fit_all)
+
+# parlor
+BAB_lm_fit_Parlor = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = BAB_Parlor)
+summary(BAB_lm_fit_Parlor)
+
+# no parlor
+BAB_lm_fit_noParlor = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = BAB_noParlor)
+summary(BAB_lm_fit_noParlor)
+
+# pasture
+BAB_lm_fit_Pasture = lm(logConc ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data = BAB_Pasture)
+summary(BAB_lm_fit_Pasture)
+
+# no pasture
+BAB_lm_fit_noPasture = lm(logConc ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + FeedPurchase +
+                  ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+ TowelMacDry, 
+                  data = BAB_noPasture)
+summary(BAB_lm_fit_noPasture)
+```
+
+### residuals lm
+```{r, eval=FALSE}
+# all data
+ BAB_lm_fit_all_id = lm(logConc ~  
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data =  BABdata)
+
+ BAB_res_fit_all = lm( BAB_lm_fit_all_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data =  BABdata)
+summary( BAB_res_fit_all)
+
+# Parlor
+ BAB_lm_fit_Parlor_id = lm(logConc ~ 
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data =  BAB_Parlor)
+
+ BAB_res_fit_Parlor = lm( BAB_lm_fit_Parlor_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data =  BAB_Parlor)
+summary( BAB_res_fit_Parlor)
+
+# No Parlor
+ BAB_lm_fit_noParlor_id = lm(logConc ~  
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data =  BAB_noParlor)
+
+ BAB_res_fit_noParlor = lm( BAB_lm_fit_noParlor_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data =  BAB_noParlor)
+summary( BAB_res_fit_noParlor)
 
 
+# Pasture
+ BAB_lm_fit_Pasture_id = lm(logConc ~  
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data =  BAB_Pasture)
 
+ BAB_res_fit_Pasture = lm( BAB_lm_fit_Pasture_id$residuals ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data =  BAB_Pasture)
+summary( BAB_res_fit_Pasture)
+
+# No Pasture
+ BAB_lm_fit_noPasture_id = lm(logConc ~ 
+              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
+              FullEmpNum  +  PartEmpNum + PartEmp, data =  BAB_noPasture)
+
+ BAB_res_fit_noPasture = lm( BAB_lm_fit_noPasture_id$residuals ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
+                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
+                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + 
+                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
+                  TowelMacDry, data =  BAB_noPasture)
+summary( BAB_res_fit_noPasture)
+```
+
+
+### pdp for BAB
+```{r, eval=FALSE}
+source("Scripts/BABdata_PDP.R")
+source("Scripts/BAB_Parlor_PDP.R")
+source("Scripts/BAB_noParlor_PDP.R")
+source("Scripts/BAB_Pasture_PDP.R")
+source("Scripts/BAB_noPasture_PDP.R")
+```
 
 
 
