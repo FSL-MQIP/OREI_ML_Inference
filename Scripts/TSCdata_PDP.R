@@ -12,7 +12,7 @@ TSC_recipe = recipe(logConc ~ ., data = TSCdata) %>%
              "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
              "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
              "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), num_comp = 5) %>%
-  step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>% 
+  step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
   step_nzv(all_predictors(), freq_cut = 85/15) 
 
 rf_spec = rand_forest(
@@ -82,8 +82,8 @@ TSC_explainer = explain_tidymodels(
 )
 
 
-numVar = c("CowNum", "FullEmpNum", "CertYear", "PplNumPerWk", "PplNumPerShift", "NonFamEmpNum", "StockDen", "SPCvar")
-catVar = c("PartEmp", "Loc","ClipFlame", "HouseStyle","ParlorManScrap", "CowMilkLoc", "CowWaitMilk")
+numVar = c("CowNum", "SPCvar","CertYear", "PplNumPerWk", "PplNumPerShift", "NonFamEmpNum", "FullEmpNum", "StockDen")
+catVar = c("PartEmp", "ClipFlame", "HouseStyle","ParlorManScrap", "CowMilkLoc", "HoldManScrap", "CornSilage")
 
 numPlots = list()
 for (i in 1:length(numVar)) {
@@ -95,7 +95,7 @@ for (i in 1:length(numVar)) {
          color = NULL)
   
   file_name = paste0("Figure/Partial dependence plots/TSC/TSC_pdp_", numVar[i], ".tiff")
-  ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
+  #ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
   
   numPlots[[i]] = pdp
   
@@ -117,7 +117,7 @@ for (i in 1:length(catVar)) {
     theme(axis.text.x = element_text(size = 4))
   
   file_name = paste0("Figure/Partial dependence plots/TSC/TSC_pdp_", catVar[i], ".tiff")
-  ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
+  #ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
   
   catPlots[[i]] = pdp
   

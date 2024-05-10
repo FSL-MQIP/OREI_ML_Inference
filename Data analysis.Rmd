@@ -25,10 +25,10 @@ library(skimr)
 ```{r, message=FALSE}
 # load the datasets
 farmSurvey = read_csv("Data/Farm Survey data.csv")
-microTest = read_csv("Data/Raw Milk Micro data.csv")
+microTest = read_csv("Data/Raw Milk Micro Data.csv") 
 
 # merge the two datasets
-surveyMicroData = merge(farmSurvey, microTest, by = c("FarmID", "Sampling"))
+surveyMicroData = full_join(farmSurvey, microTest, by = c("FarmID", "Sampling"))
 
 # simplify column names
 colnames(surveyMicroData) = c("FarmID", "Sampling", "Loc", "University", "CertYear", "HouseStyle", 
@@ -42,20 +42,19 @@ colnames(surveyMicroData) = c("FarmID", "Sampling", "Loc", "University", "CertYe
                "TowelType", "TowelCleanProto", "CowTowelWipe", "CornSilage", "Haylage",
                "CornMeal", "DryHay", "Baleage", "GrassSillage", "Earlage", "Snaplage",
                "OtherFeed", "BioFeedAdd", "DryMatPercent", "FeedPurchase", "Coop",
-               "ClosedHerd", "Test", "GreaterLess",  "Conc", "Notes")
+               "ClosedHerd", "Test", "Conc", "Notes")
 
 # skim data structure
 #skim(surveyMicroData)
 
 # modify specific surveyMicroDataa entries
-surveyMicroData = surveyMicroData %>% 
+surveyMicroData = surveyMicroData %>%
   ## remove lab errors
   mutate(Notes = replace_na(Notes, "No notes")) %>% 
+  mutate(Notes = tolower(Notes)) %>% 
   filter(Notes != "lab error") %>% 
   ## remove no test
   filter(!is.na(Test)) %>% 
-  ## replace NAs in GreaterLess with = 
-  mutate(GreaterLess = replace_na(GreaterLess, "=")) %>%
   ## stocking density
   mutate(StockDen = ifelse(StockDen == "BEDDED PACK" | 
                              StockDen == "PASTURE" |
@@ -166,19 +165,24 @@ surveyMicroData = surveyMicroData %>%
 ## calculate SPC variability per farm
 SPCvar = surveyMicroData %>% 
   filter(Test == "APC") %>% 
-  mutate(Conc = if_else(GreaterLess == "<", 0.25 * Conc, Conc)) %>% 
   group_by(FarmID) %>% 
   summarise(SPCvar = sd(log10(Conc), na.rm = T)) %>% 
   mutate(SPCvar = replace_na(SPCvar, mean(SPCvar, na.rm = T)))
 
 ## add SPC variability as a predictor for each farm
 surveyMicroData = full_join(surveyMicroData, SPCvar, by = c("FarmID"))
+surveyMicroData = surveyMicroData %>% filter(!is.na(Loc))
 
 ## Check summary stats for single variable
 #surveyMicroData %>% 
 #  group_by(Bed) %>% 
 #  summarise(n = n()) %>% 
 #  mutate(freq = n/sum(n))
+
+## Check no duplicated rows
+#surveyMicroData %>%
+#  group_by(FarmID, Sampling, Test) %>%
+#  filter(n() > 1L) 
 ```
 
 ### 2.2 Weather data 
@@ -254,7 +258,7 @@ for (i in 1:nrow(surveyMicroData)){
 # combine the survey micro data set and the weather data set
 FarmData = merge(surveyMicroData, weatherData, by = c("FarmID", "SampleTime"))
 
-write.csv(FarmData, "FarmData.csv")
+#write.csv(FarmData, "Data/FarmData.csv")
 #skim(FarmData)
 ```
 
@@ -262,12 +266,56 @@ write.csv(FarmData, "FarmData.csv")
 ```{r}
 FarmData = FarmData %>% 
   mutate_if(is.logical, as.numeric) %>% 
-  filter(!is.na(Test) & !is.na(Conc)) %>% 
-  mutate(Conc = ifelse(GreaterLess == "<", 0.25 * Conc, Conc))
+  filter(!is.na(Test) & !is.na(Conc)) 
+
 
 skim(FarmData)
 
 # prepare the dataset for modeling
+
+```
+```{r}
+
+FarmData %>% 
+  filter(Test %in% c("MSC", "TSC", "PSC","BAB")) %>% 
+  ggplot(aes(x = log10(Conc), fill = Parlor)) +
+  geom_histogram(alpha = 0.5, position = "identity", aes(y = ..density..)) +
+  geom_density(alpha = 0.5)+
+  facet_wrap(vars(Test), scales = "free", ncol = 4) +
+  theme_classic() +
+  theme(
+        axis.title.x=element_blank()) +
+  labs(x = expression(paste(log[10], "CFU/mL or ", log[10], "MPN/L")),
+       y = "Frequency")
+#ggsave("Manuscript/Spore by parlor.tiff", height = 2, width = 8, units = "in", dpi = "retina")
+
+FarmData %>% 
+  filter(Test %in% c("MSC", "TSC", "PSC","BAB")) %>% 
+  mutate(Farm = ifelse(CertYear <= 9, "New farm", "Old farm")) %>% 
+  ggplot(aes(x = log10(Conc), fill = Farm)) +
+  geom_histogram(alpha = 0.5, position = "identity", aes(y = ..density..)) +
+  geom_density(alpha = 0.5)+
+  facet_wrap(vars(Test), scales = "free", ncol = 4) +
+  theme_classic() +
+  theme(
+        axis.title.x=element_blank()) +
+  labs(x = expression(paste(log[10], "CFU/mL or ", log[10], "MPN/L")),
+       y = "Frequency")
+#ggsave("Manuscript/Spore by farm year.tiff", height = 2, width = 8, units = "in", dpi = "retina")
+
+FarmData %>% 
+  filter(Test %in% c("MSC", "TSC", "PSC","BAB")) %>% 
+  mutate(Pasture = ifelse(PastureTime == 0, "w/o pasture time", "w/ pasture time")) %>% 
+  ggplot(aes(x = log10(Conc), fill = Pasture)) +
+  geom_histogram(alpha = 0.5, position = "identity", aes(y = ..density..)) +
+  geom_density(alpha = 0.5)+
+  facet_wrap(vars(Test), scales = "free", ncol = 4) +
+  theme_classic() +
+  theme(
+        axis.title.x=element_blank()) +
+  labs(x = expression(paste(log[10], "CFU/mL or ", log[10], "MPN/L")),
+       y = "Frequency")
+#ggsave("Manuscript/Spore by pasture time.tiff", height = 2, width = 8, units = "in", dpi = "retina")
 
 ```
 
@@ -278,9 +326,138 @@ skim(FarmData)
 FarmData %>% 
   group_by(Test) %>% 
   summarise(mean_count = mean(log10(Conc)),
-            sd_count = sd(log10(Conc)))
+            sd_count = sd(log10(Conc)),
+            n = n())
+
+# check prevalence
+FarmData %>% 
+  filter(Test == "MSC") %>% 
+  count(Conc == 0.125)
+
+FarmData %>% 
+  filter(Test == "BAB") %>% 
+  count(Conc == 4.5)
+
+FarmData %>% 
+  filter(Test == "TSC") %>% 
+  count(Conc == 0.125)
+
+FarmData %>% 
+  filter(Test == "PSC") %>% 
+  count(Conc == 0.005)
+
+# summary by farm
+FarmData %>% 
+  group_by(FarmID) %>%
+  filter(Test == "APC") %>% 
+  summarise(mean_count = mean(log10(Conc)),
+            sd_count = sd(log10(Conc)),
+            n = n()) %>% 
+  arrange(sd_count)
+
+FarmData %>% 
+  group_by(FarmID) %>%
+  filter(Test == "APC") %>% 
+  summarise(mean_count = mean(log10(Conc)),
+            sd_count = sd(log10(Conc)),
+            n = n()) %>% 
+  arrange(mean_count)
+
+FarmData %>% 
+  filter(Test == "MSC") %>% 
+  group_by(FarmID) %>%
+  summarise(mean_count = mean(log10(Conc)),
+            sd_count = sd(log10(Conc)),
+            n = n()) %>% 
+  summarise(mean_mean = mean(mean_count),
+            mean_sd = sd(mean_count),
+            mean_max = max(mean_count),
+            mean_min = min(mean_count),
+            sd_mean = mean(sd_count, na.rm = T),
+            sd_sd = sd(sd_count, na.rm = T),
+            sd_max = max(sd_count, na.rm = T),
+            sd_min = min(sd_count, na.rm = T))
+## cv by type
+FarmData %>% 
+  filter(Test == "APC") %>% 
+  group_by(FarmID) %>%
+  summarise(mean_count = mean(log10(Conc)),
+            sd_count = sd(log10(Conc)),
+            n = n()) %>% 
+  summarise(mean_CV = sd(mean_count)/mean(mean_count),
+            sd_CV = sd(sd_count, na.rm = T)/mean(sd_count, na.rm = T))
+
+FarmData %>% 
+  filter(Test == "MSC") %>% 
+  group_by(FarmID) %>%
+  summarise(mean_count = mean(log10(Conc)),
+            sd_count = sd(log10(Conc)),
+            n = n()) %>% 
+  summarise(mean_CV = sd(mean_count)/mean(mean_count),
+            sd_CV = sd(sd_count, na.rm = T)/mean(sd_count, na.rm = T))
+
+FarmData %>% 
+  filter(Test == "BAB") %>% 
+  group_by(FarmID) %>%
+  summarise(mean_count = mean(log10(Conc)),
+            sd_count = sd(log10(Conc)),
+            n = n()) %>% 
+  summarise(mean_CV = sd(mean_count)/mean(mean_count),
+            sd_CV = sd(sd_count, na.rm = T)/mean(sd_count, na.rm = T))
+
+FarmData %>% 
+  filter(Test == "TSC") %>% 
+  group_by(FarmID) %>%
+  summarise(mean_count = mean(log10(Conc)),
+            sd_count = sd(log10(Conc)),
+            n = n()) %>% 
+  summarise(mean_CV = sd(mean_count)/mean(mean_count),
+            sd_CV = sd(sd_count, na.rm = T)/mean(sd_count, na.rm = T))
+
+FarmData %>% 
+  filter(Test == "PSC") %>% 
+  group_by(FarmID) %>%
+  summarise(mean_count = mean(log10(Conc)),
+            sd_count = sd(log10(Conc)),
+            n = n()) %>% 
+  summarise(mean_CV = sd(mean_count)/mean(mean_count),
+            sd_CV = sd(sd_count, na.rm = T)/mean(sd_count, na.rm = T))
+
+## plot for summary stats by farm
+FarmData %>% 
+  group_by(FarmID, Test) %>%
+  summarise(mean_count = mean(log10(Conc)),
+            sd_count = sd(log10(Conc))) %>% 
+  ggplot(aes(x = mean_count, fill = Test)) +
+  geom_histogram() +
+  facet_wrap(vars(Test), scales = "free", ncol = 5) +
+  theme_classic() +
+  theme(legend.position = "none",
+        axis.title.x=element_blank())
+#ggsave("Manuscript/mean by farm.tiff", height = 2, width = 8, units = "in", dpi = "retina")
+
+FarmData %>% 
+  group_by(FarmID, Test) %>%
+  summarise(mean_count = mean(log10(Conc)),
+            sd_count = sd(log10(Conc))) %>% 
+  ggplot(aes(x = sd_count, fill = Test)) +
+  geom_histogram() +
+  facet_wrap(vars(Test), scales = "free", ncol = 5) +
+  theme_classic() +
+  theme(legend.position = "none",
+        axis.title.x=element_blank())
+#ggsave("Manuscript/sd by farm.tiff", height = 2, width = 8, units = "in", dpi = "retina")
+
+```
 
 
+```{r}
+## correlation between spore types
+FarmData %>%
+  group_by(FarmID, Sampling, Test) %>%
+  filter(n() > 1L) %>% 
+  ungroup() %>% 
+  select(FarmID, Sampling, Test, Conc)
 
 
 ## univariate plots
@@ -322,15 +499,45 @@ FarmData %>%
 
 ## spore count by type 
 FarmData %>% 
-  filter(Test %in% c("MSC", "TSC", "BAB")) %>% 
+  filter(Test %in% c("APC","MSC", "TSC", "PSC","BAB")) %>% 
   ggplot(aes(x = log10(Conc), fill = Test)) +
   geom_histogram() +
-  facet_wrap(vars(Test)) +
+  facet_wrap(vars(Test), scales = "free", ncol = 5) +
   theme_classic() +
-  theme(legend.position = "none") +
-  labs(x = expression(paste(log[10], "CFU/mL or ", log[10], "MPN/mL")),
+  theme(legend.position = "none",
+        axis.title.x=element_blank()) +
+  labs(x = expression(paste(log[10], "CFU/mL or ", log[10], "MPN/L")),
        y = "Frequency")
-ggsave("Manuscript/Fig1.tiff", height = 4, width = 8, units = "in", dpi = "retina")
+#ggsave("Manuscript/Fig1.tiff", height = 2, width = 8, units = "in", dpi = "retina")
+
+
+## summary plot for farm variables
+char_vars <- sapply(FarmData, is.character)
+
+# Initialize an empty list to store results
+results_list <- list()
+
+# Loop through the character variables and calculate percentages
+for (var_name in names(FarmData)[char_vars]) {
+  # Count occurrences of each level
+  level_counts <- table(FarmData[, var_name])
+  
+  # Calculate percentages
+  percentage <- (level_counts / sum(level_counts))
+  
+  # Create a data frame for the variable
+  result_df <- data.frame(Level = names(level_counts), Percentage = percentage)
+  
+  # Add the result to the list
+  results_list[[var_name]] <- result_df
+}
+
+# Display the results
+for (var_name in names(FarmData)[char_vars]) {
+  cat("Variable:", var_name, "\n")
+  print(results_list[[var_name]])
+  cat("\n")
+}
 ```
 
 ## 4. ML for explorative analysis 
@@ -353,7 +560,7 @@ set.seed(1)
 MSCdata = FarmData %>% 
   filter(Test == "MSC") %>% 
   mutate(logConc = log10(Conc)) %>% 
-  select(-c(GreaterLess, Conc, FarmID, SampleTime, Sampling, University, Coop, Loc))
+  dplyr::select(-c(Conc, FarmID, SampleTime, Sampling, University, Coop, Loc))
 
 MSC_Parlor = MSCdata %>% filter(Parlor == "Yes")
 
@@ -371,7 +578,7 @@ MSC_oldFarm = MSCdata %>% filter(CertYear > 9)
 TSCdata = FarmData %>% 
   filter(Test == "TSC") %>% 
   mutate(logConc = log10(Conc)) %>% 
-  select(-c(GreaterLess, Conc, FarmID, SampleTime, Sampling, University, Coop, Loc))
+  dplyr::select(-c(Conc, FarmID, SampleTime, Sampling, University, Coop, Loc))
 
 TSC_Parlor = TSCdata %>% filter(Parlor == "Yes")
 
@@ -388,9 +595,9 @@ TSC_oldFarm = TSCdata %>% filter(CertYear > 9)
 ## Susbet data for PSC
 PSCdata = FarmData %>% 
   filter(Test == "PSC") %>% 
-  mutate(Pres = ifelse(GreaterLess == "<", 0, 1),
+  mutate(Pres = ifelse(Conc == 0.005, 0, 1),
          Pres = as.factor(Pres)) %>% 
-  select(-c(GreaterLess, Conc, FarmID, SampleTime, Sampling, University, Coop, Loc))
+  dplyr::select(-c(Conc, FarmID, SampleTime, Sampling, University, Coop, Loc))
 
 PSC_Parlor = PSCdata %>% filter(Parlor == "Yes")
 
@@ -408,7 +615,7 @@ PSC_oldFarm = PSCdata %>% filter(CertYear > 9)
 BABdata = FarmData %>% 
   filter(Test == "BAB") %>% 
   mutate(logConc = log10(Conc)) %>% 
-  select(-c(GreaterLess, Conc, FarmID, SampleTime, Sampling, University, Coop, Loc))
+  dplyr::select(-c(Conc, FarmID, SampleTime, Sampling, University, Coop, Loc))
 
 BAB_Parlor = BABdata %>% filter(Parlor == "Yes")
 
@@ -842,6 +1049,7 @@ set.seed(1)
 MSC_list = list(MSCdata, MSC_Parlor, MSC_noParlor, MSC_Pasture, MSC_noPasture, MSC_oldFarm, MSC_newFarm)
 subset_names = c("All", "Parlor","noParlor","Pasture","noPasture","oldFarm", "newFarm")
 MSC_rs_paras = tibble()
+MSC_vip = c()
 MSC_PCA_explained = data.frame(matrix(NA, ncol = 7, nrow = 5)) 
 names(MSC_PCA_explained) = subset_names
 
@@ -907,6 +1115,8 @@ for (i in 1:length(MSC_list)){
   file_name = paste0("Figure/MSC/MSC_VIP_", subset_names[i], ".tiff")
   ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
   
+  MSC_vip = c(MSC_vip, vip_plot$data$Variable)
+  
   pca_prep = prep(MSC_recipe)
 
   tidied_pca = tidy(pca_prep, 3)
@@ -952,6 +1162,7 @@ for (i in 1:length(MSC_list)){
 
 MSC_rs_paras
 MSC_PCA_explained
+table(MSC_vip)
 
 save(MSC_rs_paras, file = "Results/MSC_results.RData")
 save(MSC_PCA_explained, file = "Results/MSC_PCA_results.RData")
@@ -972,6 +1183,8 @@ source("Scripts/MSC_Parlor_PDP.R")
 source("Scripts/MSC_noParlor_PDP.R")
 source("Scripts/MSC_Pasture_PDP.R")
 source("Scripts/MSC_noPasture_PDP.R")
+source("Scripts/MSC_newFarm_PDP.R")
+source("Scripts/MSC_oldFarm_PDP.R")
 
 ```
 
@@ -1161,6 +1374,7 @@ set.seed(1)
 TSC_list = list(TSCdata, TSC_Parlor, TSC_noParlor, TSC_Pasture, TSC_noPasture, TSC_oldFarm, TSC_newFarm)
 subset_names = c("All", "Parlor","noParlor","Pasture","noPasture","oldFarm", "newFarm")
 TSC_rs_paras = tibble()
+TSC_vip = c()
 TSC_PCA_explained = data.frame(matrix(NA, ncol = 7, nrow = 5)) 
 names(TSC_PCA_explained) = subset_names
 
@@ -1226,6 +1440,8 @@ for (i in 1:length(TSC_list)){
   file_name = paste0("Figure/TSC/TSC_VIP_", subset_names[i], ".tiff")
   ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
   
+  TSC_vip = c(TSC_vip, vip_plot$data$Variable)
+  
   pca_prep = prep(TSC_recipe)
 
   tidied_pca = tidy(pca_prep, 3)
@@ -1271,6 +1487,7 @@ for (i in 1:length(TSC_list)){
 
 TSC_rs_paras
 TSC_PCA_explained
+table(TSC_vip)
 
 save(TSC_rs_paras, file = "Results/TSC_results.RData")
 save(TSC_PCA_explained, file = "Results/TSC_PCA_results.RData")
@@ -1392,6 +1609,8 @@ source("Scripts/TSC_Parlor_PDP.R")
 source("Scripts/TSC_noParlor_PDP.R")
 source("Scripts/TSC_Pasture_PDP.R")
 source("Scripts/TSC_noPasture_PDP.R")
+source("Scripts/TSC_newFarm_PDP.R")
+source("Scripts/TSC_oldFarm_PDP.R")
 ```
 
 
@@ -1402,6 +1621,7 @@ set.seed(1)
 PSC_list = list(PSCdata, PSC_Parlor, PSC_noParlor, PSC_Pasture, PSC_noPasture, PSC_oldFarm, PSC_newFarm)
 subset_names = c("All", "Parlor","noParlor","Pasture","noPasture","oldFarm", "newFarm")
 PSC_rs_paras = tibble()
+PSC_vip = c()
 PSC_PCA_explained = data.frame(matrix(NA, ncol = 7, nrow = 5)) 
 names(PSC_PCA_explained) = subset_names
 
@@ -1468,6 +1688,8 @@ for (i in 1:length(PSC_list)){
   file_name = paste0("Figure/PSC/PSC_VIP_", subset_names[i], ".tiff")
   ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
   
+  PSC_vip = c(PSC_vip, vip_plot$data$Variable)
+  
   pca_prep = prep(PSC_recipe)
 
   tidied_pca = tidy(pca_prep, 3)
@@ -1513,6 +1735,7 @@ for (i in 1:length(PSC_list)){
 
 PSC_rs_paras
 PSC_PCA_explained
+table(PSC_vip)
 
 save(PSC_rs_paras, file = "Results/PSC_results.RData")
 save(PSC_PCA_explained, file = "Results/PSC_PCA_results.RData")
@@ -1651,6 +1874,8 @@ source("Scripts/PSC_Parlor_PDP.R")
 source("Scripts/PSC_noParlor_PDP.R")
 source("Scripts/PSC_Pasture_PDP.R")
 source("Scripts/PSC_noPasture_PDP.R")
+source("Scripts/PSC_newFarm_PDP.R")
+source("Scripts/PSC_oldFarm_PDP.R")
 ```
 
 
@@ -1661,6 +1886,7 @@ set.seed(1)
 BAB_list = list(BABdata, BAB_Parlor, BAB_noParlor, BAB_Pasture, BAB_noPasture, BAB_oldFarm, BAB_newFarm)
 subset_names = c("All", "Parlor","noParlor","Pasture","noPasture","oldFarm", "newFarm")
 BAB_rs_paras = tibble()
+BAB_vip = c()
 BAB_PCA_explained = data.frame(matrix(NA, ncol = 7, nrow = 5)) 
 names(BAB_PCA_explained) = subset_names
 
@@ -1726,6 +1952,8 @@ for (i in 1:length(BAB_list)){
   file_name = paste0("Figure/BAB/BAB_VIP_", subset_names[i], ".tiff")
   ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
   
+  BAB_vip = c(BAB_vip, vip_plot$data$Variable)
+  
   pca_prep = prep(BAB_recipe)
 
   tidied_pca = tidy(pca_prep, 3)
@@ -1771,10 +1999,36 @@ for (i in 1:length(BAB_list)){
 
 BAB_rs_paras
 BAB_PCA_explained
+table(BAB_vip)
 
 save(BAB_rs_paras, file = "Results/BAB_results.RData")
 save(BAB_PCA_explained, file = "Results/BAB_PCA_results.RData")
 ```
+
+## VIP heatmap
+```{r}
+library(ggplot2)
+library(hrbrthemes)
+
+heatmapData = read_csv("Data/VIP Heatmap Data.csv", show_col_types = FALSE)
+heatmapData$Vars = factor(heatmapData$Vars, levels = rev(heatmapData$Vars))
+
+heatmapData_long = heatmapData %>% 
+  pivot_longer(!Vars, names_to = "dataset", values_to = "count") %>% 
+  mutate(dataset = factor(dataset, 
+                          levels = c("All", "newFarm", "oldFarm",
+                                     "parlor", "noParlor", "pasture", "noPasture")))
+
+heatMap = heatmapData_long %>% 
+  ggplot(aes(dataset, Vars, fill = count)) + 
+  geom_tile() +
+  scale_fill_gradient(low="white", high="blue") +
+  theme(axis.text = element_text(size = 4))
+  
+ggsave(heatMap, file = "Manuscript/heat map.tiff", height = 4, width = 8, units = "in", dpi = "retina")
+```
+
+
 
 ## linear regression
 ```{r, eval=FALSE}
@@ -1891,6 +2145,8 @@ source("Scripts/BAB_Parlor_PDP.R")
 source("Scripts/BAB_noParlor_PDP.R")
 source("Scripts/BAB_Pasture_PDP.R")
 source("Scripts/BAB_noPasture_PDP.R")
+source("Scripts/BAB_newFarm_PDP.R")
+source("Scripts/BAB_oldFarm_PDP.R")
 ```
 
 
@@ -1900,10 +2156,6 @@ source("Scripts/BAB_noPasture_PDP.R")
 
 
 ################################################## archive #####################################################
-
-
-
-
 
 
 
@@ -2155,14 +2407,8 @@ workflow() %>%
 ```{r, eval=FALSE}
 set.seed(1)
 
-# Model for predicting TSC
-TSCdata = FarmData %>% 
-  filter(Test == "TSC") %>% 
-  mutate(logConc = log10(Conc)) %>% 
-  select(-c(FarmID, Sampling, Test, GreaterLess, SampleTime, UneditConc, Conc))
-
 # Subset data for training and testing
-TSC_split= initial_split(TSCdata, prop = 524/525, strata = logConc)
+TSC_split= initial_split(TSCdata, prop = 0.7, strata = logConc)
 TSC_train = training(TSC_split)
 TSC_test = testing(TSC_split)
 
@@ -2175,20 +2421,19 @@ weatherVars = weatherData %>%
   colnames()
 
 TSC_recipe = recipe(logConc ~ ., data = TSC_train) %>% 
-  update_role(CertYear, Loc, Coop, University, new_role = "Non-predictor") %>% 
   step_zv(all_predictors()) %>% 
-  #step_pca(c("tempmax","tempmin","temp","dew","humidity","precip","precipcover","windgust",      
-  #           "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","dew_1d","humidity_1d",
-  #           "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
-  #           "tempmin_2d","temp_2d","dew_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
-  #           "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d", "dew_3d", "humidity_3d", "precip_3d",
-  #           "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), threshold = 0.9) %>% 
+  step_pca(c("tempmax","tempmin","temp","humidity","precip","precipcover","windgust",      
+             "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","humidity_1d",
+             "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
+             "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
+             "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
+             "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), threshold = 0.9) %>% 
   #step_pca(all_numeric_predictors(), threshold = 0.95) %>% 
   step_normalize(all_numeric_predictors()) %>% 
   #step_other(all_nominal_predictors(), threshold = 0.5) %>% 
   step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
   #step_corr(all_numeric_predictors(), threshold = 0.8) %>% 
-  step_nzv(all_predictors(), freq_cut = 90/10) 
+  step_nzv(all_predictors(), freq_cut = 85/15) 
 
 TSC_recipe %>% prep() %>%  bake(NULL) %>% dim()
 
@@ -2324,6 +2569,7 @@ workflow() %>%
   fit(TSC_train) %>% 
   extract_fit_parsnip() %>% 
   vip(geom = "point", num_features = 15)
+
 
 #imp_spec = xgb_spec %>% 
 #  finalize_model(select_best(xgb_rs, "rsq")) %>% 

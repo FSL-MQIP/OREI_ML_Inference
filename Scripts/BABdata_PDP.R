@@ -6,21 +6,13 @@ BAB_test = testing(BAB_split)
 BAB_recipe = recipe(logConc ~ ., data = BABdata) %>% 
   step_zv(all_predictors()) %>% 
   step_normalize(all_numeric_predictors()) %>%
-  #step_pca(c("tempmax","tempmin","temp","humidity","precip","precipcover","windgust",      
-  #           "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","humidity_1d",
-  #           "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
-  #           "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
-  #           "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
-  #           "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), num_comp = 5) %>%
-  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>% 
-  update_role(c("tempmax","tempmin","temp","humidity","precip","precipcover","windgust",      
-                "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","humidity_1d",
-                "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
-                "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
-                "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
-                "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d",
-                "CertYear","Loc", "SPCvar", "CowNum","PplNumPerWk", "PplNumPerShift", "NonFamEmpNum",
-                "FullEmpNum", "PartEmpNum", "PartEmp"), new_role = "non-predictors") %>% 
+  step_pca(c("tempmax","tempmin","temp","humidity","precip","precipcover","windgust",      
+             "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","humidity_1d",
+             "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
+             "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
+             "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
+             "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), num_comp = 5) %>%
+  step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
   step_nzv(all_predictors(), freq_cut = 85/15) 
 
 rf_spec = rand_forest(
@@ -91,12 +83,10 @@ BAB_explainer = explain_tidymodels(
 )
 
 
-numVar = c("PastureTime", "StockDen")
-catVar = c("DryMatPercent", "Bedding", "ClipFlame", "TowelDeter", "PreDipType", "StallCleanFreq", "TowelType", "GrassSillage", "PartEmp", "Haylage",
-           "TowelMacDry", "GloveFreq", "Glove")
+numVar = c("PastureTime", "CowNum", "PplNumPerWk", "CertYear", "FullEmpNum", "NonFamEmpNum", 
+           "PplNumPerShift", "SPCvar")
+catVar = c("ClipFlame", "TowelDeter", "PreDipType")
 
-#numVar = c("PastureTime", "CowNum", "StockDen", "CertYear", "PplNumPerWk", "NonFamEmpNum", "FullEmpNum", "SPCvar", "PplNumPerShift") #PC1,2,3
-#catVar = c("Loc", "ClipFlame", "TowelDeter", "PreDipType")
 
 numPlots = list()
 for (i in 1:length(numVar)) {
@@ -108,7 +98,7 @@ for (i in 1:length(numVar)) {
          color = NULL)
   
   file_name = paste0("Figure/Partial dependence plots/BAB/BAB_pdp_", numVar[i], ".tiff")
-  ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
+  #ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
   
   numPlots[[i]] = pdp
   
@@ -130,7 +120,7 @@ for (i in 1:length(catVar)) {
     theme(axis.text.x = element_text(size = 6))
   
   file_name = paste0("Figure/Partial dependence plots/BAB/BAB_pdp_", catVar[i], ".tiff")
-  ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
+  #ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
   
   catPlots[[i]] = pdp
   
