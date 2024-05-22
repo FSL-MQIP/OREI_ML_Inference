@@ -73,7 +73,7 @@ surveyMicroData = surveyMicroData %>%
     DryMatPercent %in% c("41-50%", "51-60%", "61-70%", "> 40%") ~ "40-70%",
     DryMatPercent %in% c(">70%", "> 70%") ~ "> 70%")) %>% 
   ## Test
-  mutate(Test = ifelse(Test == "MSC`", "MSC", Test)) %>% 
+  mutate(Test = ifelse(Test == "BAB`", "BAB", Test)) %>% 
   ## The frequency of adding Bed
   mutate(BedAddFreq = case_when(
     BedAddFreq %in% c("<1x/day", "2x/week", "< 1x per day") ~ "< 1x per day",
@@ -160,11 +160,13 @@ surveyMicroData = surveyMicroData %>%
   mutate(PreDipType = replace_na(PreDipType, "No predip")) %>% 
   select(-c(PreDip)) %>% 
   ## Remove useless columns (OtherFeed was removed due to high variability)
-  select(-c(OtherFeed, TeatPercent3to4, UdderPercent3to4, StallNumPerArea, CowNumPerArea, Notes)) 
+  select(-c(OtherFeed, TeatPercent3to4, UdderPercent3to4, StallNumPerArea, CowNumPerArea, Notes)) %>% 
+  ## change APC to SPC
+  mutate(Test = if_else(Test == "APC", "SPC", Test))
 
 ## calculate SPC variability per farm
 SPCvar = surveyMicroData %>% 
-  filter(Test == "APC") %>% 
+  filter(Test == "SPC") %>% 
   group_by(FarmID) %>% 
   summarise(SPCvar = sd(log10(Conc), na.rm = T)) %>% 
   mutate(SPCvar = replace_na(SPCvar, mean(SPCvar, na.rm = T)))
@@ -263,7 +265,7 @@ FarmData = merge(surveyMicroData, weatherData, by = c("FarmID", "SampleTime"))
 ```
 
 ### 2.4 Clean the combined dataset
-```{r}
+```{r, eval=FALSE}
 FarmData = FarmData %>% 
   mutate_if(is.logical, as.numeric) %>% 
   filter(!is.na(Test) & !is.na(Conc)) 
@@ -272,9 +274,6 @@ FarmData = FarmData %>%
 skim(FarmData)
 
 # prepare the dataset for modeling
-
-```
-```{r}
 
 FarmData %>% 
   filter(Test %in% c("MSC", "TSC", "PSC","BAB")) %>% 
@@ -434,7 +433,7 @@ FarmData %>%
   theme_classic() +
   theme(legend.position = "none",
         axis.title.x=element_blank())
-#ggsave("Manuscript/mean by farm.tiff", height = 2, width = 8, units = "in", dpi = "retina")
+ggsave("Manuscript/mean by farm.tiff", height = 2, width = 8, units = "in", dpi = "retina")
 
 FarmData %>% 
   group_by(FarmID, Test) %>%
@@ -446,12 +445,12 @@ FarmData %>%
   theme_classic() +
   theme(legend.position = "none",
         axis.title.x=element_blank())
-#ggsave("Manuscript/sd by farm.tiff", height = 2, width = 8, units = "in", dpi = "retina")
+ggsave("Manuscript/sd by farm.tiff", height = 2, width = 8, units = "in", dpi = "retina")
 
 ```
 
 
-```{r}
+```{r, eval=FALSE}
 ## correlation between spore types
 FarmData %>%
   group_by(FarmID, Sampling, Test) %>%
@@ -479,7 +478,7 @@ for (i in 1:ncol(FarmData)){
             facet_wrap(~Test)+
             theme_bw()
     }
-    paste0("Summary plots/", var, ".tiff", by="") %>% ggsave()
+    #paste0("Summary plots/", var, ".tiff", by="") %>% ggsave()
 }
 
 
@@ -490,7 +489,7 @@ FarmData %>%
 
 ## spore count by type for each farm over sampling time
 #FarmData %>% 
-#  filter(Test == "MSC" & FarmID %in% c("R1", "R2")) %>% 
+#  filter(Test == "BAB" & FarmID %in% c("R1", "R2")) %>% 
 #  ggplot(aes(x = Sampling, y = log10(Conc), color = FarmID)) +
 #  geom_point() +
 #  facet_wrap(vars(FarmID)) +
@@ -499,7 +498,7 @@ FarmData %>%
 
 ## spore count by type 
 FarmData %>% 
-  filter(Test %in% c("APC","MSC", "TSC", "PSC","BAB")) %>% 
+  filter(Test %in% c("SPC","MSC", "TSC", "PSC","BAB")) %>% 
   ggplot(aes(x = log10(Conc), fill = Test)) +
   geom_histogram() +
   facet_wrap(vars(Test), scales = "free", ncol = 5) +
@@ -508,7 +507,7 @@ FarmData %>%
         axis.title.x=element_blank()) +
   labs(x = expression(paste(log[10], "CFU/mL or ", log[10], "MPN/L")),
        y = "Frequency")
-#ggsave("Manuscript/Fig1.tiff", height = 2, width = 8, units = "in", dpi = "retina")
+ggsave("Manuscript/Fig1.tiff", height = 2, width = 8, units = "in", dpi = "retina")
 
 
 ## summary plot for farm variables
@@ -533,11 +532,11 @@ for (var_name in names(FarmData)[char_vars]) {
 }
 
 # Display the results
-for (var_name in names(FarmData)[char_vars]) {
-  cat("Variable:", var_name, "\n")
-  print(results_list[[var_name]])
-  cat("\n")
-}
+#for (var_name in names(FarmData)[char_vars]) {
+#  cat("Variable:", var_name, "\n")
+#  print(results_list[[var_name]])
+#  cat("\n")
+#}
 ```
 
 ## 4. ML for explorative analysis 
@@ -545,11 +544,15 @@ for (var_name in names(FarmData)[char_vars]) {
 ```{r}
 library(tidymodels)
 library(vip)
-library(learntidymodels)
+#library(learntidymodels)
 library(patchwork)
 library(ggforce)
 library(tidytext)
 library(themis)
+library(pdp)
+library(cowplot)
+library(DALEXtra)
+library(gridExtra)
 ```
 
 ### split dataset
@@ -631,367 +634,6 @@ BAB_oldFarm = BABdata %>% filter(CertYear > 9)
 
 ```
 
-### PCA for farm-size and weather variables
-```{r, eval=FALSE}
-spore_list = list(MSCdata, TSCdata, PSCdata, BABdata)
-weatherVars = c("tempmax","tempmin","temp","humidity","precip","precipcover","windgust",      
-             "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","humidity_1d",
-             "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
-             "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
-             "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
-             "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d")
-sizeVars = c("StockDen", "CowNum", "PplNumPerWk", "PplNumPerShift", "NonFamEmpNum", "FullEmpNum", "PartEmpNum")
-totalVars = names(MSCdata)
-pracVars = totalVars[! totalVars %in% c(weatherVars, sizeVars, "Loc", "Test")]
-
-rec = recipe(logConc ~ ., data = MSCdata) %>% 
-  step_zv(all_predictors()) %>% 
-  step_normalize(all_numeric_predictors()) %>%
-  step_pca(all_of(weatherVars), num_comp = 5, prefix = "weatherPC") %>%
-  step_pca(all_of(sizeVars), num_comp = 1, prefix = "sizePC") %>%
-  #step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
-  #step_pca(all_of(pracVars), num_comp = 7, prefix = "pracPC") %>% 
-  step_nzv(all_predictors(), freq_cut = 85/15)
-  
-pca_prep = prep(rec)
-
-weather_pca = tidy(pca_prep, 3)
-
-weather_pca %>%
-    filter(component %in% paste0("PC", 1:5)) %>%
-    mutate(component = fct_inorder(component)) %>%
-    ggplot(aes(value, terms, fill = terms)) +
-    geom_col(show.legend = FALSE) +
-    facet_wrap(~component, nrow = 1) +
-    labs(y = NULL) +
-    theme(axis.text.y = element_text(size = 5))
-ggsave("Figure/PCA/WeatherPC.tiff", height = 4, width = 8, units = "in", dpi = "retina")
-
-weather_pca %>%
-    filter(component %in% paste0("PC", 1:5)) %>%
-    group_by(component) %>%
-    top_n(8, abs(value)) %>%
-    ungroup() %>%
-    mutate(terms = reorder_within(terms, abs(value), component)) %>%
-    ggplot(aes(abs(value), terms, fill = value > 0)) +
-    geom_col() +
-    facet_wrap(~component, scales = "free_y") +
-    scale_y_reordered() +
-    labs(
-      x = "Absolute value of contribution",
-      y = NULL, fill = "Positive?"
-    )
-ggsave("Figure/PCA/WeatherPC_top5.tiff", height = 4, width = 8, units = "in", dpi = "retina")
-    
-sdev = pca_prep$steps[[3]]$res$sdev
-percent_variation = sdev^2 / sum(sdev^2)
-var_df = data.frame(PC=paste0("PC",1:length(sdev)),
-                       var_explained=percent_variation,
-                       stringsAsFactors = FALSE)
-    
-Weather_top5 = var_df[1:5, 2]
-Weather_top5
-    
-size_pca = tidy(pca_prep, 4)
-
-size_pca %>%
-    filter(component %in% paste0("PC", 1:5)) %>%
-    mutate(component = fct_inorder(component)) %>%
-    ggplot(aes(value, terms, fill = terms)) +
-    geom_col(show.legend = FALSE) +
-    facet_wrap(~component, nrow = 1) +
-    labs(y = NULL) +
-    theme(axis.text.y = element_text(size = 5))
-ggsave("Figure/PCA/FarmSizePC.tiff", height = 4, width = 8, units = "in", dpi = "retina")
-
-size_pca %>%
-    filter(component %in% paste0("PC", 1:5)) %>%
-    group_by(component) %>%
-    top_n(8, abs(value)) %>%
-    ungroup() %>%
-    mutate(terms = reorder_within(terms, abs(value), component)) %>%
-    ggplot(aes(abs(value), terms, fill = value > 0)) +
-    geom_col() +
-    facet_wrap(~component, scales = "free_y") +
-    scale_y_reordered() +
-    labs(
-      x = "Absolute value of contribution",
-      y = NULL, fill = "Positive?"
-    )
-ggsave("Figure/PCA/FarmSizePC_top5.tiff", height = 4, width = 8, units = "in", dpi = "retina")
-    
-sdev = pca_prep$steps[[4]]$res$sdev
-percent_variation = sdev^2 / sum(sdev^2)
-var_df = data.frame(PC=paste0("PC",1:length(sdev)),
-                       var_explained=percent_variation,
-                       stringsAsFactors = FALSE)
-    
-FarmSize_top5 = var_df[1:5, 2]
-FarmSize_top5
-
-
-MSC_prac = MSCdata %>% select(all_of(pracVars))
-rec_prac = recipe(logConc ~ ., data = MSC_prac) %>% 
-  step_zv(all_predictors()) %>% 
-  step_normalize(all_numeric_predictors()) %>%
-  step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
-  step_pca(all_predictors(), num_comp = 7, prefix = "pracPC") %>% 
-  step_nzv(all_predictors(), freq_cut = 85/15)
-
-pca_prep = prep(rec_prac)
-
-prac_pca = tidy(pca_prep, 4)
-
-prac_pca %>%
-    filter(component %in% paste0("PC", 1:5)) %>%
-    mutate(component = fct_inorder(component)) %>%
-    ggplot(aes(value, terms, fill = terms)) +
-    geom_col(show.legend = FALSE) +
-    facet_wrap(~component, nrow = 1) +
-    labs(y = NULL) +
-    theme(axis.text.y = element_text(size = 5))
-ggsave("Figure/PCA/PracPC.tiff", height = 4, width = 8, units = "in", dpi = "retina")
-
-prac_pca %>%
-    filter(component %in% paste0("PC", 1:5)) %>%
-    group_by(component) %>%
-    top_n(8, abs(value)) %>%
-    ungroup() %>%
-    mutate(terms = reorder_within(terms, abs(value), component)) %>%
-    ggplot(aes(abs(value), terms, fill = value > 0)) +
-    geom_col() +
-    facet_wrap(~component, scales = "free_y") +
-    scale_y_reordered() +
-    labs(
-      x = "Absolute value of contribution",
-      y = NULL, fill = "Positive?"
-    )
-ggsave("Figure/PCA/PracPC_top5.tiff", height = 4, width = 8, units = "in", dpi = "retina")
-    
-sdev = pca_prep$steps[[4]]$res$sdev
-percent_variation = sdev^2 / sum(sdev^2)
-var_df = data.frame(PC=paste0("PC",1:length(sdev)),
-                       var_explained=percent_variation,
-                       stringsAsFactors = FALSE)
-Prac_top5 = var_df[1:5, 2]
-Prac_top5
-```
-### decision tree
-```{r, eval=FALSE}
-library(rpart.plot)
-library(rattle)
-library(party)
-
-
-set.seed(1)
-varToRemove = c("tempmax","tempmin","temp","humidity","precip","windgust",      
-             "windspeed","solarradiation","tempmax_1d","tempmin_1d",
-             "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
-             "tempmin_2d","temp_2d", "humidity_2d","precip_2d","windgust_2d","windspeed_2d",
-             "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
-             "precipcover_3d",  "windspeed_3d","solarradiation_3d","SPCvar","CowNum", "PplNumPerShift","PartEmpNum", 
-             "Loc", "CertYear")
-varToRemove = c(weatherVars, "SPCvar","CowNum", "PplNumPerShift","PartEmpNum", "Loc", "CertYear")
-### MSC
-MSC_recipe = recipe(logConc ~ ., data = MSC_oldFarm) %>% 
-  step_zv(all_predictors()) %>% 
-  update_role(all_of(varToRemove), 
-             new_role = "non-predictors") %>% 
-  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
-  step_nzv(all_predictors(), freq_cut = 85/15) 
-
-MSC_postprocess = MSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
-
-MSC_oldFarm_tree_fit = rpart(logConc ~., data = MSC_postprocess)
-printcp(MSC_oldFarm_tree_fit)
-MSC_oldFarm_tree_pfit =  rpart::prune(MSC_oldFarm_tree_fit,
-                               cp = MSC_oldFarm_tree_fit$cptable[which.min(MSC_oldFarm_tree_fit$cptable[,"xerror"]),"CP"])
-
-rpart.plot(MSC_oldFarm_tree_pfit, cex = 0.7, roundint=FALSE)
-
-
-MSC_recipe = recipe(logConc ~ ., data = MSC_newFarm) %>% 
-  step_zv(all_predictors()) %>% 
-  update_role(all_of(varToRemove), 
-             new_role = "non-predictors") %>% 
-  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
-  step_nzv(all_predictors(), freq_cut = 85/15) 
-
-MSC_postprocess = MSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
-
-MSC_newFarm_tree_fit = rpart(logConc ~., data = MSC_postprocess)
-printcp(MSC_newFarm_tree_fit)
-MSC_newFarm_tree_pfit =  rpart::prune(MSC_newFarm_tree_fit,
-                               cp = MSC_newFarm_tree_fit$cptable[which.min(MSC_newFarm_tree_fit$cptable[,"xerror"]),"CP"])
-
-rpart.plot(MSC_newFarm_tree_pfit, cex = 0.7, roundint=FALSE)
-
-MSC_recipe = recipe(logConc ~ ., data = MSCdata) %>% 
-  step_zv(all_predictors()) %>% 
-  update_role(all_of(varToRemove), 
-             new_role = "non-predictors") %>% 
-  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
-  step_nzv(all_predictors(), freq_cut = 85/15) 
-
-MSC_postprocess = MSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
-
-MSC_all_tree_fit = rpart(logConc ~., data = MSC_postprocess)
-printcp(MSC_all_tree_fit)
-MSC_all_tree_pfit =  rpart::prune(MSC_all_tree_fit,
-                               cp = MSC_all_tree_fit$cptable[which.min(MSC_all_tree_fit$cptable[,"xerror"]),"CP"])
-
-rpart.plot(MSC_all_tree_pfit, cex = 0.7, roundint=FALSE)
-
-
-### TSC
-TSC_recipe = recipe(logConc ~ ., data = TSC_oldFarm) %>% 
-  step_zv(all_predictors()) %>% 
-  update_role(all_of(varToRemove), 
-             new_role = "non-predictors") %>% 
-  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
-  step_nzv(all_predictors(), freq_cut = 85/15) 
-
-TSC_postprocess = TSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
-
-TSC_oldFarm_tree_fit = rpart(logConc ~., data = TSC_postprocess)
-printcp(TSC_oldFarm_tree_pfit)
-TSC_oldFarm_tree_pfit =  rpart::prune(TSC_oldFarm_tree_fit,
-                               cp = TSC_oldFarm_tree_fit$cptable[which.min(TSC_oldFarm_tree_fit$cptable[,"xerror"]),"CP"])
-
-rpart.plot(TSC_oldFarm_tree_fit, cex = 0.7, roundint=FALSE)
-
-TSC_recipe = recipe(logConc ~ ., data = TSC_newFarm) %>% 
-  step_zv(all_predictors()) %>% 
-  update_role(all_of(varToRemove), 
-             new_role = "non-predictors") %>% 
-  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
-  step_nzv(all_predictors(), freq_cut = 85/15) 
-
-TSC_postprocess = TSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
-
-TSC_newFarm_tree_fit = rpart(logConc ~., data = TSC_postprocess)
-printcp(TSC_newFarm_tree_fit)
-TSC_newFarm_tree_pfit =  rpart::prune(TSC_newFarm_tree_fit,
-                               cp = TSC_newFarm_tree_fit$cptable[which.min(TSC_newFarm_tree_fit$cptable[,"xerror"]),"CP"])
-
-rpart.plot(TSC_newFarm_tree_pfit, cex = 0.7, roundint=FALSE)
-
-TSC_recipe = recipe(logConc ~ ., data = TSCdata) %>% 
-  step_zv(all_predictors()) %>% 
-  update_role(all_of(varToRemove), 
-             new_role = "non-predictors") %>% 
-  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
-  step_nzv(all_predictors(), freq_cut = 85/15) 
-
-TSC_postprocess = TSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
-
-TSC_all_tree_fit = rpart(logConc ~., data = TSC_postprocess)
-printcp(TSC_all_tree_fit)
-TSC_all_tree_pfit =  rpart::prune(TSC_all_tree_fit,
-                               cp = TSC_all_tree_fit$cptable[which.min(TSC_all_tree_fit$cptable[,"xerror"]),"CP"])
-
-rpart.plot(TSC_all_tree_pfit, cex = 0.7, roundint=FALSE)
-
-### PSC
-PSC_recipe = recipe(Pres ~ ., data = PSC_oldFarm) %>% 
-  step_zv(all_predictors()) %>% 
-  update_role(all_of(varToRemove), 
-             new_role = "non-predictors") %>% 
-  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
-  step_nzv(all_predictors(), freq_cut = 85/15) 
-
-PSC_postprocess = PSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
-
-PSC_oldFarm_tree_fit = rpart(Pres ~., data = PSC_postprocess)
-printcp(PSC_oldFarm_tree_fit)
-PSC_oldFarm_tree_pfit =  rpart::prune(PSC_oldFarm_tree_fit,
-                               cp = PSC_oldFarm_tree_fit$cptable[which.min(PSC_oldFarm_tree_fit$cptable[,"xerror"]),"CP"])
-
-rpart.plot(PSC_oldFarm_tree_pfit, cex = 0.7, roundint=FALSE)
-
-PSC_recipe = recipe(Pres ~ ., data = PSC_newFarm) %>% 
-  step_zv(all_predictors()) %>% 
-  update_role(all_of(varToRemove), 
-             new_role = "non-predictors") %>% 
-  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
-  step_nzv(all_predictors(), freq_cut = 85/15) 
-
-PSC_postprocess = PSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
-
-PSC_newFarm_tree_fit = rpart(Pres ~., data = PSC_postprocess)
-printcp(PSC_newFarm_tree_fit)
-PSC_newFarm_tree_pfit =  rpart::prune(PSC_newFarm_tree_fit,
-                               cp = PSC_newFarm_tree_fit$cptable[which.min(PSC_newFarm_tree_fit$cptable[,"xerror"]),"CP"])
-
-rpart.plot(PSC_newFarm_tree_pfit, cex = 0.7, roundint=FALSE)
-
-PSC_recipe = recipe(Pres ~ ., data = PSCdata) %>% 
-  step_zv(all_predictors()) %>% 
-  update_role(all_of(varToRemove), 
-             new_role = "non-predictors") %>% 
-  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
-  step_nzv(all_predictors(), freq_cut = 85/15) 
-
-PSC_postprocess = PSC_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
-
-PSC_all_tree_fit = rpart(Pres ~., data = PSC_postprocess)
-printcp(PSC_all_tree_fit)
-PSC_all_tree_pfit =  rpart::prune(PSC_all_tree_fit,
-                               cp = PSC_all_tree_fit$cptable[which.min(PSC_all_tree_fit$cptable[,"xerror"]),"CP"])
-
-rpart.plot(PSC_all_tree_pfit, cex = 0.7, roundint=FALSE)
-
-
-### BAB
-BAB_recipe = recipe(logConc ~ ., data = BAB_oldFarm) %>% 
-  step_zv(all_predictors()) %>% 
-  update_role(all_of(varToRemove), 
-             new_role = "non-predictors") %>% 
-  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
-  step_nzv(all_predictors(), freq_cut = 85/15) 
-
-BAB_postprocess = BAB_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
-
-BAB_oldFarm_tree_fit = rpart(logConc ~., data = BAB_postprocess)
-printcp(BAB_oldFarm_tree_fit)
-BAB_oldFarm_tree_pfit =  rpart::prune(BAB_oldFarm_tree_fit,
-                               cp = BAB_oldFarm_tree_fit$cptable[which.min(BAB_oldFarm_tree_fit$cptable[,"xerror"]),"CP"])
-
-rpart.plot(BAB_oldFarm_tree_pfit, cex = 0.7, roundint=FALSE)
-
-BAB_recipe = recipe(logConc ~ ., data = BAB_newFarm) %>% 
-  step_zv(all_predictors()) %>% 
-  update_role(all_of(varToRemove), 
-             new_role = "non-predictors") %>% 
-  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
-  step_nzv(all_predictors(), freq_cut = 85/15) 
-
-BAB_postprocess = BAB_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
-
-BAB_newFarm_tree_fit = rpart(logConc ~., data = BAB_postprocess)
-printcp(BAB_newFarm_tree_fit)
-BAB_newFarm_tree_pfit =  rpart::prune(BAB_newFarm_tree_fit,
-                               cp = BAB_newFarm_tree_fit$cptable[which.min(BAB_newFarm_tree_fit$cptable[,"xerror"]),"CP"])
-
-rpart.plot(BAB_newFarm_tree_pfit, cex = 0.7, roundint=FALSE)
-
-BAB_recipe = recipe(logConc ~ ., data = BABdata) %>% 
-  step_zv(all_predictors()) %>% 
-  update_role(all_of(varToRemove), 
-             new_role = "non-predictors") %>% 
-  #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>%
-  step_nzv(all_predictors(), freq_cut = 85/15) 
-
-BAB_postprocess = BAB_recipe %>% prep() %>% bake(NULL) %>% select(-c(varToRemove))
-
-BAB_all_tree_fit = rpart(logConc ~., data = BAB_postprocess)
-printcp(BAB_all_tree_fit)
-BAB_all_tree_pfit =  rpart::prune(BAB_all_tree_fit,
-                               cp = BAB_all_tree_fit$cptable[which.min(BAB_all_tree_fit$cptable[,"xerror"]),"CP"])
-
-rpart.plot(BAB_all_tree_pfit, cex = 0.7, roundint=FALSE)
-```
-
 ### helper
 ```{r}
 ggplot_pdp <- function(obj, x) {
@@ -1049,7 +691,13 @@ set.seed(1)
 MSC_list = list(MSCdata, MSC_Parlor, MSC_noParlor, MSC_Pasture, MSC_noPasture, MSC_oldFarm, MSC_newFarm)
 subset_names = c("All", "Parlor","noParlor","Pasture","noPasture","oldFarm", "newFarm")
 MSC_rs_paras = tibble()
-MSC_vip = c()
+MSC_vip = tibble(All = rep(NA,10),
+                 Parlor = rep(NA,10),
+                 noParlor = rep(NA,10),
+                 Pasture = rep(NA,10),
+                 noPasture= rep(NA,10),
+                 oldFarm = rep(NA,10),
+                 newFarm = rep(NA,10))
 MSC_PCA_explained = data.frame(matrix(NA, ncol = 7, nrow = 5)) 
 names(MSC_PCA_explained) = subset_names
 
@@ -1078,8 +726,8 @@ for (i in 1:length(MSC_list)){
   nVar = dimension[2]
   
   rf_grid = grid_max_entropy(
-    min_n(c(1L, 40L)),
-    mtry(c(1L, nVar)),
+    min_n(c(2L, 10L)),
+    mtry(c(1L, nVar - 1)),
     size = 40
   )
   
@@ -1101,8 +749,17 @@ for (i in 1:length(MSC_list)){
   best_rs_paras = best_rs %>% slice(1) %>% mutate(dataset = subset_names[i])
   MSC_rs_paras = bind_rows(best_rs_paras, MSC_rs_paras)
   
+  # select the final model
+  choose_tree = MSC_rs %>% select_best(metric = "rsq")
+  
+  final_model = MSC_wf %>% 
+    finalize_workflow(choose_tree) 
+
+  final_fit = fit(final_model, data = MSC_list[[i]])
+  
+  # create VIPs
   imp_spec = rf_spec %>% 
-    finalize_model(select_best(MSC_rs, "rsq")) %>% 
+    finalize_model(select_best(MSC_rs, metric = "rsq")) %>% 
     set_engine("ranger", importance = "permutation")
 
   vip_plot = workflow() %>% 
@@ -1110,12 +767,85 @@ for (i in 1:length(MSC_list)){
       add_model(imp_spec) %>% 
       fit(MSC_list[[i]]) %>% 
       extract_fit_parsnip() %>% 
-      vip(geom = "point", num_features = 15)
+      vip(geom = "point", num_features = 10)
   
   file_name = paste0("Figure/MSC/MSC_VIP_", subset_names[i], ".tiff")
   ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
   
-  MSC_vip = c(MSC_vip, vip_plot$data$Variable)
+  # Create PDPs
+  vip_features = vip_plot$data$Variable
+  vip_features = vip_features %>% 
+    sub("_.*", "", .) %>% 
+    .[!grepl("PC", .)]
+  print(paste0("Top variables are ", vip_features))
+  
+  # Loop through variable names and categorize based on type in the dataset
+  numVar <- character()
+  catVar <- character()
+
+
+  for (var in vip_features) {
+    if (is.numeric(MSC_list[[i]][[var]])) {
+      numVar = c(numVar, var)
+    } else {
+      catVar = c(catVar, var)
+    }
+  }
+  
+  model_explainer = explain_tidymodels(
+    final_fit,
+    data = MSC_list[[i]],
+    y = MSC_list[[i]]$logConc,
+    verbose = F)
+  
+  numPlots = list()
+  for (j in 1:length(numVar)) {
+    profile = model_profile(model_explainer, N = NULL, variables = numVar[j])
+    
+    pdp = ggplot_pdp(profile, !!as.name(numVar[j])) +
+      labs(x = numVar[j],
+           y = "logConc",
+           color = NULL)
+    
+    file_name = paste0("Figure/MSC/PDP/MSC_pdp_", subset_names[i], "_", numVar[j], ".tiff")
+    ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
+    
+    numPlots[[j]] = pdp
+    
+  }
+  
+  numPlots_grid = gridExtra::grid.arrange(grobs = numPlots, ncol = 3)
+  file_name = paste0("Figure/MSC/NumVars_MSC_", subset_names[i], ".pdf")
+  ggsave(file_name, numPlots_grid, 
+         height = 4, width = 8, units = "in", dpi = "retina")
+  
+  
+  catPlots = list()
+  for (k in 1:length(catVar)) {
+    profile = model_profile(model_explainer, N = NULL, variables = catVar[k])
+    
+    pdp = ggplot_pdp_cat(profile, !!as.name(catVar[k])) +
+      labs(x = catVar[k],
+           y = "logConc",
+           color = NULL)+
+      theme(axis.text.x = element_text(size = 4))
+    
+    file_name = paste0("Figure/MSC/PDP/MSC_pdp_", subset_names[i], "_", catVar[k], ".tiff")
+    ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
+    
+    catPlots[[k]] = pdp
+    
+  }
+  
+  catPlots_grid = gridExtra::grid.arrange(grobs = catPlots, ncol = 3)
+  file_name = paste0("Figure/MSC/CatVars_MSC_", subset_names[i], ".pdf")
+  ggsave(file_name, catPlots_grid,
+         height = 4, width = 8, units = "in", dpi = "retina")
+
+  
+  
+  # Create VIP tibble
+  MSC_vip[[i]] = vip_plot$data$Variable
   
   pca_prep = prep(MSC_recipe)
 
@@ -1162,210 +892,12 @@ for (i in 1:length(MSC_list)){
 
 MSC_rs_paras
 MSC_PCA_explained
-table(MSC_vip)
+MSC_vip
 
 save(MSC_rs_paras, file = "Results/MSC_results.RData")
 save(MSC_PCA_explained, file = "Results/MSC_PCA_results.RData")
 
 ```
-
-
-#### partial dependence plot for MSC data
-```{r, eval=FALSE}
-library(pdp)
-library(cowplot)
-library(DALEXtra)
-library(gridExtra)
-
-
-source("Scripts/MSCdata_PDP.R")
-source("Scripts/MSC_Parlor_PDP.R")
-source("Scripts/MSC_noParlor_PDP.R")
-source("Scripts/MSC_Pasture_PDP.R")
-source("Scripts/MSC_noPasture_PDP.R")
-source("Scripts/MSC_newFarm_PDP.R")
-source("Scripts/MSC_oldFarm_PDP.R")
-
-```
-
-#### Linear regression for intervention strategies
-```{r, eval=FALSE}
-set.seed(1)
-
-MSC_recipe = recipe(logConc ~ ., data = MSCdata) %>% 
-    step_zv(all_predictors()) %>% 
-    step_normalize(all_numeric_predictors()) %>%
-    update_role(c("tempmax","tempmin","temp","humidity","precip","precipcover","windgust",      
-             "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","humidity_1d",
-             "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
-             "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
-             "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
-             "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d",
-             "CertYear","Loc", "SPCvar", "CowNum","PplNumPerWk", "PplNumPerShift", "NonFamEmpNum",
-             "FullEmpNum", "PartEmpNum"), new_role = "non-predictors") %>% 
-    #step_dummy(all_nominal_predictors(), -Loc, one_hot = FALSE) %>% 
-    step_nzv(all_predictors(), freq_cut = 85/15) 
-
-rf_spec = rand_forest(
-     trees = 1000,
-     min_n = tune(),
-     mtry = tune()) %>% 
-     set_engine("ranger") %>% 
-     set_mode("regression")
-  
-dimension = MSC_recipe %>% prep() %>% bake(NULL) %>% dim()
-nVar = dimension[2] - 1
-  
-rf_grid = grid_max_entropy(
-    min_n(c(1L, 40L)),
-    mtry(c(1L, 56)),
-    size = 40
-)
-  
-MSC_wf = workflow() %>% 
-    add_recipe(MSC_recipe) %>% 
-    add_model(rf_spec)
-  
-MSC_folds = vfold_cv(MSCdata, strata = logConc, v = 3)
-  
-MSC_rs = tune_grid(
-    MSC_wf,
-    MSC_folds,
-    grid = rf_grid,
-    metrics = metric_set(rsq),
-    control = control_grid(verbose = FALSE)
-)
-  
-best_rs = show_best(MSC_rs, metric = "rsq")
-best_rs
-  
-imp_spec = rf_spec %>% 
-    finalize_model(select_best(MSC_rs, "rsq")) %>% 
-    set_engine("ranger", importance = "permutation")
-
-vip_plot = workflow() %>% 
-      add_recipe(MSC_recipe) %>% 
-      add_model(imp_spec) %>% 
-      fit(MSCdata) %>% 
-      extract_fit_parsnip() %>% 
-      vip(geom = "point", num_features = 10)
-vip_plot
-
-library(glmnet)
-MSC_lm_fit = lm(logConc ~ HouseStyle + Parlor + CowMilkLoc + CowWaitMilk + TowelType + ParlorHose + ClipFlame +
-                  ParlorManScrap + TowelDeter + StockDen + PastureTime, data = MSCdata)
-
-X = MSCdata %>% select(-logConc, -all_of(varToRemove))
-Y = MSCdata %>% pull(logConc)
-MSC_lasso_fit = glmnet(x = X, y = Y, alpha = 1)
-
-# all data
-MSC_lm_fit_all = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = MSCdata)
-summary(MSC_lm_fit_all)
-
-# Parlor
-MSC_lm_fit_Parlor = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = MSC_Parlor)
-summary(MSC_lm_fit_Parlor)
-
-# No Parlor
-MSC_lm_fit_noParlor = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = MSC_noParlor)
-summary(MSC_lm_fit_noParlor)
-
-
-# Pasture
-MSC_lm_fit_Pasture = lm(logConc ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = MSC_Pasture)
-summary(MSC_lm_fit_Pasture)
-
-# No Pasture
-MSC_lm_fit_noPasture = lm(logConc ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + 
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = MSC_noPasture)
-summary(MSC_lm_fit_noPasture)
-```
-
-### residuals
-```{r, eval=FALSE}
-# all data
-MSC_lm_fit_all_id = lm(logConc ~  
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data = MSCdata)
-#summary(MSC_lm_fit_all_id)
-
-MSC_res_fit_all = lm(MSC_lm_fit_all_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = MSCdata)
-summary(MSC_res_fit_all)
-
-# Parlor
-MSC_lm_fit_Parlor_id = lm(logConc ~ 
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data = MSC_Parlor)
-
-MSC_res_fit_Parlor = lm(MSC_lm_fit_Parlor_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = MSC_Parlor)
-summary(MSC_res_fit_Parlor)
-
-# No Parlor
-MSC_lm_fit_noParlor_id = lm(logConc ~  
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data = MSC_noParlor)
-
-MSC_res_fit_noParlor = lm(MSC_lm_fit_noParlor_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = MSC_noParlor)
-summary(MSC_res_fit_noParlor)
-
-
-# Pasture
-MSC_lm_fit_Pasture_id = lm(logConc ~  
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data = MSC_Pasture)
-
-MSC_res_fit_Pasture = lm(MSC_lm_fit_Pasture_id$residuals ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = MSC_Pasture)
-summary(MSC_res_fit_Pasture)
-
-# No Pasture
-MSC_lm_fit_noPasture_id = lm(logConc ~ 
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data = MSC_noPasture)
-
-MSC_res_fit_noPasture = lm(MSC_lm_fit_noPasture_id$residuals ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + 
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = MSC_noPasture)
-summary(MSC_res_fit_noPasture)
-```
-
 
 ### TSC
 ```{r}
@@ -1374,7 +906,13 @@ set.seed(1)
 TSC_list = list(TSCdata, TSC_Parlor, TSC_noParlor, TSC_Pasture, TSC_noPasture, TSC_oldFarm, TSC_newFarm)
 subset_names = c("All", "Parlor","noParlor","Pasture","noPasture","oldFarm", "newFarm")
 TSC_rs_paras = tibble()
-TSC_vip = c()
+TSC_vip = tibble(All = rep(NA,10),
+                 Parlor = rep(NA,10),
+                 noParlor = rep(NA,10),
+                 Pasture = rep(NA,10),
+                 noPasture= rep(NA,10),
+                 oldFarm = rep(NA,10),
+                 newFarm = rep(NA,10))
 TSC_PCA_explained = data.frame(matrix(NA, ncol = 7, nrow = 5)) 
 names(TSC_PCA_explained) = subset_names
 
@@ -1403,8 +941,8 @@ for (i in 1:length(TSC_list)){
   nVar = dimension[2]
   
   rf_grid = grid_max_entropy(
-    min_n(c(1L, 40L)),
-    mtry(c(1L, nVar)),
+    min_n(c(2L, 10L)),
+    mtry(c(1L, nVar - 1)),
     size = 40
   )
   
@@ -1426,8 +964,17 @@ for (i in 1:length(TSC_list)){
   best_rs_paras = best_rs %>% slice(1) %>% mutate(dataset = subset_names[i])
   TSC_rs_paras = bind_rows(best_rs_paras, TSC_rs_paras)
   
+  # select the final model
+  choose_tree = TSC_rs %>% select_best(metric = "rsq")
+  
+  final_model = TSC_wf %>% 
+    finalize_workflow(choose_tree) 
+
+  final_fit = fit(final_model, data = TSC_list[[i]])
+  
+  # create VIPs
   imp_spec = rf_spec %>% 
-    finalize_model(select_best(TSC_rs, "rsq")) %>% 
+    finalize_model(select_best(TSC_rs, metric = "rsq")) %>% 
     set_engine("ranger", importance = "permutation")
 
   vip_plot = workflow() %>% 
@@ -1435,12 +982,85 @@ for (i in 1:length(TSC_list)){
       add_model(imp_spec) %>% 
       fit(TSC_list[[i]]) %>% 
       extract_fit_parsnip() %>% 
-      vip(geom = "point", num_features = 15)
+      vip(geom = "point", num_features = 10)
   
   file_name = paste0("Figure/TSC/TSC_VIP_", subset_names[i], ".tiff")
   ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
   
-  TSC_vip = c(TSC_vip, vip_plot$data$Variable)
+  # Create PDPs
+  vip_features = vip_plot$data$Variable
+  vip_features = vip_features %>% 
+    sub("_.*", "", .) %>% 
+    .[!grepl("PC", .)]
+  print(paste0("Top variables are ", vip_features))
+  
+  # Loop through variable names and categorize based on type in the dataset
+  numVar <- character()
+  catVar <- character()
+
+
+  for (var in vip_features) {
+    if (is.numeric(TSC_list[[i]][[var]])) {
+      numVar = c(numVar, var)
+    } else  {
+      catVar = c(catVar, var)
+    }
+  }
+  
+  model_explainer = explain_tidymodels(
+    final_fit,
+    data = TSC_list[[i]],
+    y = TSC_list[[i]]$logConc,
+    verbose = F)
+  
+  numPlots = list()
+  for (j in 1:length(numVar)) {
+    profile = model_profile(model_explainer, N = NULL, variables = numVar[j])
+    
+    pdp = ggplot_pdp(profile, !!as.name(numVar[j])) +
+      labs(x = numVar[j],
+           y = "logConc",
+           color = NULL)
+    
+    file_name = paste0("Figure/TSC/PDP/TSC_pdp_", subset_names[i], "_", numVar[j], ".tiff")
+    ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
+    
+    numPlots[[j]] = pdp
+    
+  }
+  
+  numPlots_grid = gridExtra::grid.arrange(grobs = numPlots, ncol = 3)
+  file_name = paste0("Figure/TSC/NumVars_TSC_", subset_names[i], ".pdf")
+  ggsave(file_name, numPlots_grid, 
+         height = 4, width = 8, units = "in", dpi = "retina")
+  
+  
+  catPlots = list()
+  for (k in 1:length(catVar)) {
+    profile = model_profile(model_explainer, N = NULL, variables = catVar[k])
+    
+    pdp = ggplot_pdp_cat(profile, !!as.name(catVar[k])) +
+      labs(x = catVar[k],
+           y = "logConc",
+           color = NULL)+
+      theme(axis.text.x = element_text(size = 4))
+    
+    file_name = paste0("Figure/TSC/PDP/TSC_pdp_", subset_names[i], "_", catVar[k], ".tiff")
+    ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
+    
+    catPlots[[k]] = pdp
+    
+  }
+  
+  catPlots_grid = gridExtra::grid.arrange(grobs = catPlots, ncol = 3)
+  file_name = paste0("Figure/TSC/CatVars_TSC_", subset_names[i], ".pdf")
+  ggsave(file_name, catPlots_grid,
+         height = 4, width = 8, units = "in", dpi = "retina")
+
+  
+  
+  # Create VIP
+  TSC_vip[[i]] = vip_plot$data$Variable
   
   pca_prep = prep(TSC_recipe)
 
@@ -1481,136 +1101,16 @@ for (i in 1:length(TSC_list)){
                        stringsAsFactors = FALSE)
     
     top5 = var_df[1:5, 2]
-    TSC_PCA_explained[,i] = top5 
+    TSC_PCA_explained[,i] = top5    
 
 }
 
 TSC_rs_paras
 TSC_PCA_explained
-table(TSC_vip)
+TSC_vip
 
 save(TSC_rs_paras, file = "Results/TSC_results.RData")
 save(TSC_PCA_explained, file = "Results/TSC_PCA_results.RData")
-```
-
-### linear regression
-```{r, eval=FALSE}
-# all data
-TSC_lm_fit_all = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = TSCdata)
-summary(TSC_lm_fit_all)
-
-# parlor
-TSC_lm_fit_Parlor = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = TSC_Parlor)
-summary(TSC_lm_fit_Parlor)
-
-# no parlor
-TSC_lm_fit_noParlor = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = TSC_noParlor)
-summary(TSC_lm_fit_noParlor)
-
-# pasture
-TSC_lm_fit_Pasture = lm(logConc ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = TSC_Pasture)
-summary(TSC_lm_fit_Pasture)
-
-# no pasture
-TSC_lm_fit_noPasture = lm(logConc ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + FeedPurchase +
-                  ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+ TowelMacDry, 
-                  data = TSC_noPasture)
-summary(TSC_lm_fit_noPasture)
-
-```
-
-### residual lm
-```{r, eval=FALSE}
-# all data
- TSC_lm_fit_all_id = lm(logConc ~  
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data =  TSCdata)
-
- TSC_res_fit_all = lm( TSC_lm_fit_all_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data =  TSCdata)
-summary( TSC_res_fit_all)
-
-# Parlor
- TSC_lm_fit_Parlor_id = lm(logConc ~ 
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data =  TSC_Parlor)
-
- TSC_res_fit_Parlor = lm( TSC_lm_fit_Parlor_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data =  TSC_Parlor)
-summary( TSC_res_fit_Parlor)
-
-# No Parlor
- TSC_lm_fit_noParlor_id = lm(logConc ~  
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data =  TSC_noParlor)
-
- TSC_res_fit_noParlor = lm( TSC_lm_fit_noParlor_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data =  TSC_noParlor)
-summary( TSC_res_fit_noParlor)
-
-
-# Pasture
- TSC_lm_fit_Pasture_id = lm(logConc ~  
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data =  TSC_Pasture)
-
- TSC_res_fit_Pasture = lm( TSC_lm_fit_Pasture_id$residuals ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data =  TSC_Pasture)
-summary( TSC_res_fit_Pasture)
-
-# No Pasture
- TSC_lm_fit_noPasture_id = lm(logConc ~ 
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data =  TSC_noPasture)
-
- TSC_res_fit_noPasture = lm( TSC_lm_fit_noPasture_id$residuals ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + 
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data =  TSC_noPasture)
-summary( TSC_res_fit_noPasture)
-```
-
-
-### pdp for TSC
-```{r, eval=FALSE}
-source("Scripts/TSCdata_PDP.R")
-source("Scripts/TSC_Parlor_PDP.R")
-source("Scripts/TSC_noParlor_PDP.R")
-source("Scripts/TSC_Pasture_PDP.R")
-source("Scripts/TSC_noPasture_PDP.R")
-source("Scripts/TSC_newFarm_PDP.R")
-source("Scripts/TSC_oldFarm_PDP.R")
 ```
 
 
@@ -1621,7 +1121,13 @@ set.seed(1)
 PSC_list = list(PSCdata, PSC_Parlor, PSC_noParlor, PSC_Pasture, PSC_noPasture, PSC_oldFarm, PSC_newFarm)
 subset_names = c("All", "Parlor","noParlor","Pasture","noPasture","oldFarm", "newFarm")
 PSC_rs_paras = tibble()
-PSC_vip = c()
+PSC_vip = tibble(All = rep(NA,10),
+                 Parlor = rep(NA,10),
+                 noParlor = rep(NA,10),
+                 Pasture = rep(NA,10),
+                 noPasture= rep(NA,10),
+                 oldFarm = rep(NA,10),
+                 newFarm = rep(NA,10))
 PSC_PCA_explained = data.frame(matrix(NA, ncol = 7, nrow = 5)) 
 names(PSC_PCA_explained) = subset_names
 
@@ -1651,8 +1157,8 @@ for (i in 1:length(PSC_list)){
   nVar = dimension[2]
   
   rf_grid = grid_max_entropy(
-    min_n(c(1L, 40L)),
-    mtry(c(1L, nVar)),
+    min_n(c(2L, 10L)),
+    mtry(c(1L, nVar - 1)),
     size = 40
   )
   
@@ -1674,8 +1180,17 @@ for (i in 1:length(PSC_list)){
   best_rs_paras = best_rs %>% slice(1) %>% mutate(dataset = subset_names[i])
   PSC_rs_paras = bind_rows(best_rs_paras, PSC_rs_paras)
   
+  # select the final model
+  choose_tree = PSC_rs %>% select_best(metric = "accuracy")
+  
+  final_model = PSC_wf %>% 
+    finalize_workflow(choose_tree) 
+
+  final_fit = fit(final_model, data = PSC_list[[i]])
+  
+  # create VIPs
   imp_spec = rf_spec %>% 
-    finalize_model(select_best(PSC_rs, "accuracy")) %>% 
+    finalize_model(select_best(PSC_rs, metric = "accuracy")) %>% 
     set_engine("ranger", importance = "permutation")
 
   vip_plot = workflow() %>% 
@@ -1683,12 +1198,85 @@ for (i in 1:length(PSC_list)){
       add_model(imp_spec) %>% 
       fit(PSC_list[[i]]) %>% 
       extract_fit_parsnip() %>% 
-      vip(geom = "point", num_features = 15)
+      vip(geom = "point", num_features = 10)
   
   file_name = paste0("Figure/PSC/PSC_VIP_", subset_names[i], ".tiff")
   ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
   
-  PSC_vip = c(PSC_vip, vip_plot$data$Variable)
+  # Create PDPs
+  vip_features = vip_plot$data$Variable
+  vip_features = vip_features %>% 
+    sub("_.*", "", .) %>% 
+    .[!grepl("PC", .)]
+  print(paste0("Top variables are ", vip_features))
+  
+  # Loop through variable names and categorize based on type in the dataset
+  numVar <- character()
+  catVar <- character()
+
+
+  for (var in vip_features) {
+    if (is.numeric(PSC_list[[i]][[var]])) {
+      numVar = c(numVar, var)
+    } else  {
+      catVar = c(catVar, var)
+    }
+  }
+  
+  model_explainer = explain_tidymodels(
+    final_fit,
+    data = PSC_list[[i]],
+    y = PSC_list[[i]]$logConc,
+    verbose = F)
+  
+  numPlots = list()
+  for (j in 1:length(numVar)) {
+    profile = model_profile(model_explainer, N = NULL, variables = numVar[j])
+    
+    pdp = ggplot_pdp(profile, !!as.name(numVar[j])) +
+      labs(x = numVar[j],
+           y = "Likelihood of Presence",
+           color = NULL)
+    
+    file_name = paste0("Figure/PSC/PDP/PSC_pdp_", subset_names[i], "_", numVar[j], ".tiff")
+    ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
+    
+    numPlots[[j]] = pdp
+    
+  }
+  
+  numPlots_grid = gridExtra::grid.arrange(grobs = numPlots, ncol = 3)
+  file_name = paste0("Figure/PSC/NumVars_PSC_", subset_names[i], ".pdf")
+  ggsave(file_name, numPlots_grid, 
+         height = 4, width = 8, units = "in", dpi = "retina")
+  
+  
+  catPlots = list()
+  for (k in 1:length(catVar)) {
+    profile = model_profile(model_explainer, N = NULL, variables = catVar[k])
+    
+    pdp = ggplot_pdp_cat(profile, !!as.name(catVar[k])) +
+      labs(x = catVar[k],
+           y = "Likelihood of Presence",
+           color = NULL)+
+      theme(axis.text.x = element_text(size = 4))
+    
+    file_name = paste0("Figure/PSC/PDP/PSC_pdp_", subset_names[i], "_", catVar[k], ".tiff")
+    ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
+    
+    catPlots[[k]] = pdp
+    
+  }
+  
+  catPlots_grid = gridExtra::grid.arrange(grobs = catPlots, ncol = 3)
+  file_name = paste0("Figure/PSC/CatVars_PSC_", subset_names[i], ".pdf")
+  ggsave(file_name, catPlots_grid,
+         height = 4, width = 8, units = "in", dpi = "retina")
+
+  
+  
+  # Create VIP
+  PSC_vip[[i]] = vip_plot$data$Variable
   
   pca_prep = prep(PSC_recipe)
 
@@ -1729,154 +1317,18 @@ for (i in 1:length(PSC_list)){
                        stringsAsFactors = FALSE)
     
     top5 = var_df[1:5, 2]
-    PSC_PCA_explained[,i] = top5 
+    PSC_PCA_explained[,i] = top5    
 
 }
 
 PSC_rs_paras
 PSC_PCA_explained
-table(PSC_vip)
+PSC_vip
 
 save(PSC_rs_paras, file = "Results/PSC_results.RData")
 save(PSC_PCA_explained, file = "Results/PSC_PCA_results.RData")
 ```
 
-### linear regression
-```{r, eval=FALSE}
-PSCdata = FarmData %>% 
-  filter(Test == "PSC") %>% 
-  mutate(logConc = log10(Conc)) %>% 
-  select(-c(GreaterLess, Conc, FarmID, SampleTime, Sampling, University, Coop))
-
-PSC_Parlor = PSCdata %>% 
-  filter(Parlor == "Yes")
-
-PSC_noParlor = PSCdata %>% 
-  filter(Parlor == "No")
-
-PSC_Pasture = PSCdata %>% 
-  filter(PastureTime != 0)
-
-PSC_noPasture = PSCdata %>% 
-  filter(PastureTime == 0)
-
-
-# all data
-PSC_lm_fit_all = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = PSCdata)
-summary(PSC_lm_fit_all)
-
-# parlor
-PSC_lm_fit_Parlor = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = PSC_Parlor)
-summary(PSC_lm_fit_Parlor)
-
-# no parlor
-PSC_lm_fit_noParlor = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = PSC_noParlor)
-summary(PSC_lm_fit_noParlor)
-
-# pasture
-PSC_lm_fit_Pasture = lm(logConc ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = PSC_Pasture)
-summary(PSC_lm_fit_Pasture)
-
-# no pasture
-PSC_lm_fit_noPasture = lm(logConc ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + FeedPurchase +
-                  ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+ TowelMacDry, 
-                  data = PSC_noPasture)
-summary(PSC_lm_fit_noPasture)
-```
-
-### residuals lm 
-```{r, eval=FALSE}
-# all data
- PSC_lm_fit_all_id = lm(logConc ~  
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data =  PSCdata)
-
- PSC_res_fit_all = lm( PSC_lm_fit_all_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data =  PSCdata)
-summary( PSC_res_fit_all)
-
-# Parlor
- PSC_lm_fit_Parlor_id = lm(logConc ~ 
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data =  PSC_Parlor)
-
- PSC_res_fit_Parlor = lm( PSC_lm_fit_Parlor_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data =  PSC_Parlor)
-summary( PSC_res_fit_Parlor)
-
-# No Parlor
- PSC_lm_fit_noParlor_id = lm(logConc ~  
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data =  PSC_noParlor)
-
- PSC_res_fit_noParlor = lm( PSC_lm_fit_noParlor_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data =  PSC_noParlor)
-summary( PSC_res_fit_noParlor)
-
-
-# Pasture
- PSC_lm_fit_Pasture_id = lm(logConc ~  
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data =  PSC_Pasture)
-
- PSC_res_fit_Pasture = lm( PSC_lm_fit_Pasture_id$residuals ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data =  PSC_Pasture)
-summary( PSC_res_fit_Pasture)
-
-# No Pasture
- PSC_lm_fit_noPasture_id = lm(logConc ~ 
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data =  PSC_noPasture)
-
- PSC_res_fit_noPasture = lm( PSC_lm_fit_noPasture_id$residuals ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + 
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data =  PSC_noPasture)
-summary( PSC_res_fit_noPasture)
-```
-
-
-### pdp for PSC
-```{r, eval=FALSE}
-source("Scripts/PSCdata_PDP.R")
-source("Scripts/PSC_Parlor_PDP.R")
-source("Scripts/PSC_noParlor_PDP.R")
-source("Scripts/PSC_Pasture_PDP.R")
-source("Scripts/PSC_noPasture_PDP.R")
-source("Scripts/PSC_newFarm_PDP.R")
-source("Scripts/PSC_oldFarm_PDP.R")
-```
 
 
 ### BAB
@@ -1886,7 +1338,13 @@ set.seed(1)
 BAB_list = list(BABdata, BAB_Parlor, BAB_noParlor, BAB_Pasture, BAB_noPasture, BAB_oldFarm, BAB_newFarm)
 subset_names = c("All", "Parlor","noParlor","Pasture","noPasture","oldFarm", "newFarm")
 BAB_rs_paras = tibble()
-BAB_vip = c()
+BAB_vip = tibble(All = rep(NA,10),
+                 Parlor = rep(NA,10),
+                 noParlor = rep(NA,10),
+                 Pasture = rep(NA,10),
+                 noPasture= rep(NA,10),
+                 oldFarm = rep(NA,10),
+                 newFarm = rep(NA,10))
 BAB_PCA_explained = data.frame(matrix(NA, ncol = 7, nrow = 5)) 
 names(BAB_PCA_explained) = subset_names
 
@@ -1915,8 +1373,8 @@ for (i in 1:length(BAB_list)){
   nVar = dimension[2]
   
   rf_grid = grid_max_entropy(
-    min_n(c(1L, 40L)),
-    mtry(c(1L, nVar)),
+    min_n(c(2L, 10L)),
+    mtry(c(1L, nVar - 2)),
     size = 40
   )
   
@@ -1938,8 +1396,17 @@ for (i in 1:length(BAB_list)){
   best_rs_paras = best_rs %>% slice(1) %>% mutate(dataset = subset_names[i])
   BAB_rs_paras = bind_rows(best_rs_paras, BAB_rs_paras)
   
+  # select the final model
+  choose_tree = BAB_rs %>% select_best(metric = "rsq")
+  
+  final_model = BAB_wf %>% 
+    finalize_workflow(choose_tree) 
+
+  final_fit = fit(final_model, data = BAB_list[[i]])
+  
+  # create VIPs
   imp_spec = rf_spec %>% 
-    finalize_model(select_best(BAB_rs, "rsq")) %>% 
+    finalize_model(select_best(BAB_rs, metric = "rsq")) %>% 
     set_engine("ranger", importance = "permutation")
 
   vip_plot = workflow() %>% 
@@ -1947,12 +1414,84 @@ for (i in 1:length(BAB_list)){
       add_model(imp_spec) %>% 
       fit(BAB_list[[i]]) %>% 
       extract_fit_parsnip() %>% 
-      vip(geom = "point", num_features = 15)
+      vip(geom = "point", num_features = 10)
   
   file_name = paste0("Figure/BAB/BAB_VIP_", subset_names[i], ".tiff")
   ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
   
-  BAB_vip = c(BAB_vip, vip_plot$data$Variable)
+  # Create PDPs
+  vip_features = vip_plot$data$Variable
+  vip_features = vip_features %>% 
+    sub("_.*", "", .) %>% 
+    .[!grepl("PC", .)]
+  print(paste0("Top variables are ", vip_features))
+  
+  # Loop through variable names and categorize based on type in the dataset
+  numVar <- character()
+  catVar <- character()
+
+
+  for (var in vip_features) {
+    if (is.numeric(BAB_list[[i]][[var]])) {
+      numVar = c(numVar, var)
+    } else {
+      catVar = c(catVar, var)
+    }
+  }
+  
+  model_explainer = explain_tidymodels(
+    final_fit,
+    data = BAB_list[[i]],
+    y = BAB_list[[i]]$logConc,
+    verbose = F)
+  
+  numPlots = list()
+  for (j in 1:length(numVar)) {
+    profile = model_profile(model_explainer, N = NULL, variables = numVar[j])
+    
+    pdp = ggplot_pdp(profile, !!as.name(numVar[j])) +
+      labs(x = numVar[j],
+           y = "logConc",
+           color = NULL)
+    
+    file_name = paste0("Figure/BAB/PDP/BAB_pdp_", subset_names[i], "_", numVar[j], ".tiff")
+    ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
+    
+    numPlots[[j]] = pdp
+    
+  }
+  
+  numPlots_grid = gridExtra::grid.arrange(grobs = numPlots, ncol = 3)
+  file_name = paste0("Figure/BAB/NumVars_BAB_", subset_names[i], ".pdf")
+  ggsave(file_name, numPlots_grid, 
+         height = 4, width = 8, units = "in", dpi = "retina")
+  
+  
+  catPlots = list()
+  for (k in 1:length(catVar)) {
+    profile = model_profile(model_explainer, N = NULL, variables = catVar[k])
+    
+    pdp = ggplot_pdp_cat(profile, !!as.name(catVar[k])) +
+      labs(x = catVar[k],
+           y = "logConc",
+           color = NULL)+
+      theme(axis.text.x = element_text(size = 4))
+    
+    file_name = paste0("Figure/BAB/PDP/BAB_pdp_", subset_names[i], "_", catVar[k], ".tiff")
+    ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
+    
+    catPlots[[k]] = pdp
+    
+  }
+  
+  catPlots_grid = gridExtra::grid.arrange(grobs = catPlots, ncol = 3)
+  file_name = paste0("Figure/BAB/CatVars_BAB_", subset_names[i], ".pdf")
+  ggsave(file_name, catPlots_grid,
+         height = 4, width = 8, units = "in", dpi = "retina")
+
+  
+  # Create VIP
+  BAB_vip[[i]] = vip_plot$data$Variable
   
   pca_prep = prep(BAB_recipe)
 
@@ -1999,7 +1538,7 @@ for (i in 1:length(BAB_list)){
 
 BAB_rs_paras
 BAB_PCA_explained
-table(BAB_vip)
+BAB_vip
 
 save(BAB_rs_paras, file = "Results/BAB_results.RData")
 save(BAB_PCA_explained, file = "Results/BAB_PCA_results.RData")
@@ -2010,876 +1549,83 @@ save(BAB_PCA_explained, file = "Results/BAB_PCA_results.RData")
 library(ggplot2)
 library(hrbrthemes)
 
-heatmapData = read_csv("Data/VIP Heatmap Data.csv", show_col_types = FALSE)
-heatmapData$Vars = factor(heatmapData$Vars, levels = rev(heatmapData$Vars))
+#heatmapData = read_csv("Data/VIP Heatmap Data.csv", show_col_types = FALSE)
+#heatmapData$Vars = factor(heatmapData$Vars, levels = rev(heatmapData$Vars))
 
-heatmapData_long = heatmapData %>% 
-  pivot_longer(!Vars, names_to = "dataset", values_to = "count") %>% 
-  mutate(dataset = factor(dataset, 
-                          levels = c("All", "newFarm", "oldFarm",
-                                     "parlor", "noParlor", "pasture", "noPasture")))
 
-heatMap = heatmapData_long %>% 
-  ggplot(aes(dataset, Vars, fill = count)) + 
+heatmapData = bind_rows(MSC_vip, TSC_vip, PSC_vip, BAB_vip) %>%
+  pivot_longer(cols = everything(), names_to = "Dataset", values_to = "Vars") %>% 
+  count(Vars, Dataset) 
+
+
+heatmapData = heatmapData %>%
+  mutate(Vars = case_when(
+    Vars == "CertYear" ~ "Certification Year",
+    Vars == "CowNum" ~ "Cow Number",
+    Vars == "PplNumPerWk" ~ "Number of people per week",
+    Vars == "SPCvar" ~ "SPC variability",
+    Vars == "StockDen" ~ "Stock Density",
+    Vars == "PplNumPerShift" ~ "Number of people per shift",
+    Vars == "PC1" ~ "Principal component 1 associated with temperature",
+    Vars == "ClipFlame_Yes" ~ "Clipping and flaming udders",
+    Vars == "NonFamEmpNum" ~ "Number of non-family employee",
+    Vars == "PC4" ~ "Principal component 4 associated with precipitation and wind gust",
+    Vars == "CornSilage_Yes" ~ "Use of corn silage",
+    Vars == "Parlor_Yes" ~ "Presence of parlor",
+    Vars == "PC2" ~ "Principal component 2 associated with humidity",
+    Vars == "Haylage_Yes" ~ "Use of haylage",
+    Vars == "CowMilkLoc_Stall.barn" ~ "Stall barn as milking location",
+    Vars == "ParlorManScrap" ~ "Manual scrapping of parlor",
+    Vars == "ParlorHose" ~ "Use of hose to clean parlor",
+    Vars == "GloveFreq_unknown" ~ "Unknown frequency of changing glove",
+    Vars == "GloveFreq_X1" ~ "Changing glove once per day",
+    Vars == "CowParlorClean_Yes" ~ "Presence of cow during parlor/milking area cleaning",
+    Vars == "CornMeal_Yes" ~ "Corn meal",
+    Vars == "TowelMacDry" ~ "Use of machine to dry towel",
+    Vars == "StallCleanFreq_X2x.day" ~ "Cleaning stall 2 times per day",
+    Vars == "PC3" ~ "Principal component 3 associated with precipitation and wind gust",
+    Vars == "NonFamEmp_Yes" ~ "Presence of non-family employees to milk cows",
+    Vars == "HouseStyle_Free.stalls" ~ "Free stalls",
+    Vars == "CowWaitMilk_Yes" ~ "Cow waiting in the a holding area to be milked",
+    Vars == "Bed_Sawdust" ~ "Use of sawdust as bedding material",
+    Vars == "TowelType_Paper" ~ "Use of paper as towel",
+    Vars == "Glove_Yes" ~ "Use of glove during milking",
+    Vars == "CowHoldClean_No.holding.area" ~ "No holding area for cow waiting to be milked",
+    Vars == "ClosedHerd_Yes" ~ "Closed herd",
+    Vars == "TowelDeter" ~ "Use of detergent to clean towel",
+    Vars == "PreDipType_Iodine.based" ~ "Use of iodine based pre-dip",
+    Vars == "ParlorFluSys" ~ "Use of a flushing system to clean parlor",
+    Vars == "PC5" ~ "Principal componenet 5 associated with precipitation and wind speed",
+    Vars == "HoldManScrap" ~ "Manual scrapping the holding area",
+    Vars == "DryMatPercent_X40.70." ~ "Dry matter intake percentage between 40 and 70",
+    Vars == "BedAdd_no" ~ "No bedding additives",
+    Vars == "BedAddFreq_X...2x.per.day" ~ "Frequency of adding bedding more than 2 times per day",
+    Vars == "FullEmpNum" ~ "Number of full-time employees",
+    Vars == "PartEmp_Yes" ~ "Presence of part-time employees to milk cows",
+    Vars == "PastureTime" ~ "Hours cows spend on pasture"
+  ))
+
+heatmapData = heatmapData %>%
+  mutate(Dataset = factor(Dataset, levels = c("All", "Parlor", "noParlor", "Pasture", "noPasture", "newFarm", "oldFarm"))) 
+
+total_counts = heatmapData %>%
+  group_by(Vars) %>%
+  summarise(TotalCount = sum(n)) %>%
+  arrange(TotalCount)
+
+heatmapData = heatmapData %>%
+  mutate(Vars = factor(Vars, levels = total_counts$Vars))
+
+heatMap = heatmapData %>% 
+  ggplot(aes(Dataset, Vars, fill = n)) + 
   geom_tile() +
-  scale_fill_gradient(low="white", high="blue") +
-  theme(axis.text = element_text(size = 4))
-  
+  scale_fill_gradient(low="lightblue", high="darkblue") +
+  theme_classic() +
+  theme(axis.text = element_text(size = 6))
+heatMap    
+
 ggsave(heatMap, file = "Manuscript/heat map.tiff", height = 4, width = 8, units = "in", dpi = "retina")
 ```
-
-
-
-## linear regression
-```{r, eval=FALSE}
-# all data
-BAB_lm_fit_all = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = BABdata)
-summary(BAB_lm_fit_all)
-
-# parlor
-BAB_lm_fit_Parlor = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = BAB_Parlor)
-summary(BAB_lm_fit_Parlor)
-
-# no parlor
-BAB_lm_fit_noParlor = lm(logConc ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = BAB_noParlor)
-summary(BAB_lm_fit_noParlor)
-
-# pasture
-BAB_lm_fit_Pasture = lm(logConc ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data = BAB_Pasture)
-summary(BAB_lm_fit_Pasture)
-
-# no pasture
-BAB_lm_fit_noPasture = lm(logConc ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + FeedPurchase +
-                  ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+ TowelMacDry, 
-                  data = BAB_noPasture)
-summary(BAB_lm_fit_noPasture)
-```
-
-### residuals lm
-```{r, eval=FALSE}
-# all data
- BAB_lm_fit_all_id = lm(logConc ~  
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data =  BABdata)
-
- BAB_res_fit_all = lm( BAB_lm_fit_all_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data =  BABdata)
-summary( BAB_res_fit_all)
-
-# Parlor
- BAB_lm_fit_Parlor_id = lm(logConc ~ 
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data =  BAB_Parlor)
-
- BAB_res_fit_Parlor = lm( BAB_lm_fit_Parlor_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data =  BAB_Parlor)
-summary( BAB_res_fit_Parlor)
-
-# No Parlor
- BAB_lm_fit_noParlor_id = lm(logConc ~  
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data =  BAB_noParlor)
-
- BAB_res_fit_noParlor = lm( BAB_lm_fit_noParlor_id$residuals ~ HouseStyle + PastureTime + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data =  BAB_noParlor)
-summary( BAB_res_fit_noParlor)
-
-
-# Pasture
- BAB_lm_fit_Pasture_id = lm(logConc ~  
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data =  BAB_Pasture)
-
- BAB_res_fit_Pasture = lm( BAB_lm_fit_Pasture_id$residuals ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + DryMatPercent +
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data =  BAB_Pasture)
-summary( BAB_res_fit_Pasture)
-
-# No Pasture
- BAB_lm_fit_noPasture_id = lm(logConc ~ 
-              CertYear  + Loc  +  CowNum  + PplNumPerWk  +  PplNumPerShift  +  NonFamEmpNum  +
-              FullEmpNum  +  PartEmpNum + PartEmp, data =  BAB_noPasture)
-
- BAB_res_fit_noPasture = lm( BAB_lm_fit_noPasture_id$residuals ~ HouseStyle + StockDen + Bed + BedAdd + BedAddFreq + Bed +
-                  StallCleanFreq + Glove + GloveFreq + PreDipType + ClipFlame + CowMilkLoc + Parlor + CowParlorClean +
-                  CowWaitMilk + CowHoldClean + TowelType + CornSilage + Haylage + CornMeal + DryHay + Baleage + 
-                  FeedPurchase + ClosedHerd + HoldHose + HoldManScrap + ParlorHose + ParlorManScrap + ParlorFluSys + TowelDeter+
-                  TowelMacDry, data =  BAB_noPasture)
-summary( BAB_res_fit_noPasture)
-```
-
-
-### pdp for BAB
-```{r, eval=FALSE}
-source("Scripts/BABdata_PDP.R")
-source("Scripts/BAB_Parlor_PDP.R")
-source("Scripts/BAB_noParlor_PDP.R")
-source("Scripts/BAB_Pasture_PDP.R")
-source("Scripts/BAB_noPasture_PDP.R")
-source("Scripts/BAB_newFarm_PDP.R")
-source("Scripts/BAB_oldFarm_PDP.R")
-```
-
-
-
-
-
-
-
-################################################## archive #####################################################
-
-
-
-
-## 4. ML for explorative analysis (archived)
-```{r, eval=FALSE}
-library(tidymodels)
-set.seed(1)
-
-# Model for predicting MSC
-MSCdata = FarmData %>% 
-  filter(Test == "MSC") %>% 
-  mutate(Conc = ifelse(GreaterLess == "<", 0.25 * Conc, Conc)) %>% 
-  mutate(logConc = log10(Conc)) %>% 
-  select(-c(FarmID, Loc, Sampling, Test, GreaterLess, SampleTime, Conc, University, Coop))
-
-#MSCdata = FarmData %>% 
-#  filter(Test == "TSC") %>% 
-#  mutate(logConc = log10(Conc)) %>% 
-#  select(-c(FarmID, Sampling, Test, GreaterLess, SampleTime, UneditConc, Conc))
-
-# Subset data for training and testing
-MSC_split= initial_split(MSCdata, prop = 0.7, strata = logConc)
-MSC_train = training(MSC_split)
-MSC_test = testing(MSC_split)
-
-# Cross-validation
-MSC_folds = vfold_cv(MSC_train , strata = logConc, v = 5)
-
-# Model formula and variable pre-processing
-weatherVars = weatherData %>% 
-  select(-c(FarmID, SampleTime)) %>% 
-  colnames()
-
-MSC_recipe = recipe(logConc ~ ., data = MSC_train) %>% 
-  #update_role(CertYear, new_role = "Non-predictor") %>% 
-  step_zv(all_predictors()) %>% 
-  step_pca(c("tempmax","tempmin","temp","humidity","precip","precipcover","windgust",      
-             "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","humidity_1d",
-             "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
-             "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
-             "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
-             "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), threshold = 0.9) %>% 
-  #step_pca(all_numeric_predictors(), threshold = 0.95) %>% 
-  step_normalize(all_numeric_predictors()) %>% 
-  #step_other(all_nominal_predictors(), threshold = 0.5) %>% 
-  step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
-  #step_corr(all_numeric_predictors(), threshold = 0.8) %>% 
-  step_nzv(all_predictors(), freq_cut = 85/15) 
-
-MSC_recipe %>% prep() %>%  bake(NULL) %>% dim()
-
-# Set up specs for random forest and xgboost
-rf_spec = 
-   rand_forest(
-     trees = 1000,
-     min_n = tune(),
-     mtry = tune()
-     ) %>% 
-   set_engine("ranger") %>% 
-   set_mode("regression")
-
-xgb_spec =   
-  boost_tree(
-    trees = 1000,
-    min_n = tune(),
-    mtry = tune(),
-    tree_depth = tune(),
-    sample_size = tune(),
-    learn_rate = tune()
-  ) %>%
-  set_engine("xgboost") %>% 
-  set_mode("regression")
-
-#nnet_spec = 
-#   mlp(hidden_units = tune(), 
-#       penalty = tune(), 
-#       epochs = tune()) %>% 
-#   set_engine("nnet", MaxNWts = 2600) %>% 
-#   set_mode("classification")
-
-
-# Set up workflows
-rf_wf = workflow(MSC_recipe, rf_spec)
-xgb_wf = workflow(MSC_recipe, xgb_spec)
-#nnet_wf = workflow(MSC_recipe, nnet_spec)
-
-# Set up grid search for model training
-rf_grid = 
-  grid_max_entropy(
-    min_n(c(1L, 40L)),
-    mtry(c(1L, 50L)),
-    size = 40
-  )
-
-xgb_grid = 
-  grid_max_entropy(
-    tree_depth(c(1L, 10L)),
-    min_n(c(1L, 40L)),
-    mtry(c(1L, 100L)),
-    sample_prop(c(0.1, 1.0)),
-    learn_rate(c(-2, -1)),
-    size = 40
-  )
-
-# Parallel computing for model training
-library(finetune)
-#doParallel::registerDoParallel()
-
-
-rf_rs = tune_race_anova(
-  rf_wf,
-  MSC_folds,
-  grid = rf_grid,
-  metrics = metric_set(rsq),
-  control = control_race(verbose_elim = T)
-  )
-
-#xgb_rs = tune_race_anova(
-#  xgb_wf,
-#  MSC_folds,
-#  grid = xgb_grid,
-#  metrics = metric_set(rsq),
-#  control = control_race(verbose_elim = T)
-#  )
-
-#nnet_rs = tune_race_anova(
-#  nnet_wf,
-#  MSC_folds,
-#  #grid = xgb_grid,
-#  metrics = metric_set(rmse),
-#  control = control_race(verbose_elim = T)
-#  )
-
-# Show best results
-plot_race(rf_rs)
-show_best(rf_rs, metric = "rsq")
-#show_best(xgb_rs, metric = "rsq")
-#show_best(nnet_rs, metric = "rmse")
-
-# Show training results
-rf_last = 
-  rf_wf %>% 
-  finalize_workflow(select_best(rf_rs, "rsq")) %>% 
-  last_fit(MSC_split)
-
-#xgb_last = 
-#  xgb_wf %>% 
-#  finalize_workflow(select_best(xgb_rs, "rsq")) %>% 
-#  last_fit(MSC_split)
-
-#nnet_last = 
-#  nnet_wf %>% 
-#  finalize_workflow(select_best(nnet_rs, "rmse")) %>% 
-#  last_fit(MSC_split)
-
-
-# Model validation on the testing set
-rf_last %>% 
-  collect_predictions() %>% 
-  rsq(.pred, logConc)
-  #ggplot(aes(x = .pred, y = logConc)) +
-  #geom_point()
-
-
-
-#xgb_last %>% 
-#  collect_predictions() %>% 
-#  ggplot(aes(x = .pred, y = logConc)) +
-#  geom_point()
-
-#nnet_last %>% 
-#  collect_predictions() %>% 
-#  conf_mat(.pred_class, LessThan10)
-
-# Variable importance plot
-library(vip)
-imp_spec = rf_spec %>% 
-  finalize_model(select_best(rf_rs, "rsq")) %>% 
-  set_engine("ranger", importance = "permutation")
-
-workflow() %>% 
-  add_recipe(MSC_recipe) %>% 
-  add_model(imp_spec) %>% 
-  fit(MSC_train) %>% 
-  extract_fit_parsnip() %>% 
-  vip(geom = "point", num_features = 15)
-
-#imp_spec = xgb_spec %>% 
-#  finalize_model(select_best(xgb_rs, "rsq")) %>% 
-#  set_engine("xgboost", importance = "permutation")
-
-#workflow() %>% 
-#  add_recipe(MSC_recipe) %>% 
-#  add_model(imp_spec) %>% 
-#  fit(MSC_train) %>% 
-#  extract_fit_parsnip() %>% 
-#  vip(geom = "point", num_features = 15)
-
-
-# PCA
-#library(learntidymodels)
-#library(patchwork)
-#library(ggforce)
-#library(tidytext)
-
-#pca_prep = prep(MSC_recipe)
-
-#tidied_pca = tidy(pca_prep, 2)
-
-#tidied_pca %>%
-#  filter(component %in% paste0("PC", 1:5)) %>%
-#  mutate(component = fct_inorder(component)) %>%
-#  ggplot(aes(value, terms, fill = terms)) +
-#  geom_col(show.legend = FALSE) +
-#  facet_wrap(~component, nrow = 1) +
-#  labs(y = NULL) +
-#  theme(axis.text.y = element_text(size = 5))
-
-#tidied_pca %>%
-#  filter(component %in% paste0("PC", 1:4)) %>%
-#  group_by(component) %>%
-#  top_n(8, abs(value)) %>%
-#  ungroup() %>%
-#  mutate(terms = reorder_within(terms, abs(value), component)) %>%
-#  ggplot(aes(abs(value), terms, fill = value > 0)) +
-#  geom_col() +
-#  facet_wrap(~component, scales = "free_y") +
-#  scale_y_reordered() +
-#  labs(
-#    x = "Absolute value of contribution",
-#    y = NULL, fill = "Positive?"
-#  )
-
-
-###############################################################
-#sdev = pca_prep$steps[[2]]$res$sdev
-#percent_variation = sdev^2 / sum(sdev^2)
-#var_df = data.frame(PC=paste0("PC",1:length(sdev)),
-#                     var_explained=percent_variation,
-#                     stringsAsFactors = FALSE)
-#var_df %>%
-#  dplyr::slice(1:10) %>% 
-#  mutate(PC = fct_inorder(PC)) %>%
-#  ggplot(aes(x=PC,y=var_explained))+geom_col()
-```
-
-## TSC
-```{r, eval=FALSE}
-set.seed(1)
-
-# Subset data for training and testing
-TSC_split= initial_split(TSCdata, prop = 0.7, strata = logConc)
-TSC_train = training(TSC_split)
-TSC_test = testing(TSC_split)
-
-# Cross-validation
-TSC_folds = vfold_cv(TSC_train , strata = logConc, v = 5)
-
-# Model formula and variable pre-processing
-weatherVars = weatherData %>% 
-  select(-c(FarmID, SampleTime)) %>% 
-  colnames()
-
-TSC_recipe = recipe(logConc ~ ., data = TSC_train) %>% 
-  step_zv(all_predictors()) %>% 
-  step_pca(c("tempmax","tempmin","temp","humidity","precip","precipcover","windgust",      
-             "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","humidity_1d",
-             "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
-             "tempmin_2d","temp_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
-             "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d",  "humidity_3d", "precip_3d",
-             "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), threshold = 0.9) %>% 
-  #step_pca(all_numeric_predictors(), threshold = 0.95) %>% 
-  step_normalize(all_numeric_predictors()) %>% 
-  #step_other(all_nominal_predictors(), threshold = 0.5) %>% 
-  step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
-  #step_corr(all_numeric_predictors(), threshold = 0.8) %>% 
-  step_nzv(all_predictors(), freq_cut = 85/15) 
-
-TSC_recipe %>% prep() %>%  bake(NULL) %>% dim()
-
-# Set up specs for random forest and xgboost
-rf_spec = 
-   rand_forest(
-     trees = 1000,
-     min_n = tune(),
-     mtry = tune()
-     ) %>% 
-   set_engine("ranger") %>% 
-   set_mode("regression")
-
-xgb_spec =   
-  boost_tree(
-    trees = 1000,
-    min_n = tune(),
-    mtry = tune(),
-    tree_depth = tune(),
-    sample_size = tune(),
-    learn_rate = tune()
-  ) %>%
-  set_engine("xgboost") %>% 
-  set_mode("regression")
-
-#nnet_spec = 
-#   mlp(hidden_units = tune(), 
-#       penalty = tune(), 
-#       epochs = tune()) %>% 
-#   set_engine("nnet", MaxNWts = 2600) %>% 
-#   set_mode("classification")
-
-
-# Set up workflows
-rf_wf = workflow(TSC_recipe, rf_spec)
-xgb_wf = workflow(TSC_recipe, xgb_spec)
-#nnet_wf = workflow(TSC_recipe, nnet_spec)
-
-# Set up grid search for model training
-rf_grid = 
-  grid_max_entropy(
-    min_n(c(1L, 40L)),
-    mtry(c(1L, 98L)),
-    size = 40
-  )
-
-xgb_grid = 
-  grid_max_entropy(
-    tree_depth(c(1L, 10L)),
-    min_n(c(1L, 40L)),
-    mtry(c(1L, 98L)),
-    sample_prop(c(0.1, 1.0)),
-    learn_rate(c(-2, -1)),
-    size = 40
-  )
-
-# Parallel computing for model training
-library(finetune)
-doParallel::registerDoParallel()
-
-
-rf_rs = tune_race_anova(
-  rf_wf,
-  TSC_folds,
-  grid = rf_grid,
-  metrics = metric_set(rsq),
-  control = control_race(verbose_elim = T)
-  )
-
-#xgb_rs = tune_race_anova(
-#  xgb_wf,
-#  TSC_folds,
-#  grid = xgb_grid,
-#  metrics = metric_set(rsq),
-#  control = control_race(verbose_elim = T)
-#  )
-
-#nnet_rs = tune_race_anova(
-#  nnet_wf,
-#  TSC_folds,
-#  #grid = xgb_grid,
-#  metrics = metric_set(rmse),
-#  control = control_race(verbose_elim = T)
-#  )
-
-# Show best results
-plot_race(rf_rs)
-show_best(rf_rs, metric = "rsq")
-#show_best(xgb_rs, metric = "rsq")
-#show_best(nnet_rs, metric = "rmse")
-
-# Show training results
-rf_last = 
-  rf_wf %>% 
-  finalize_workflow(select_best(rf_rs, "rsq")) %>% 
-  last_fit(TSC_split)
-
-#xgb_last = 
-##  xgb_wf %>% 
-#  finalize_workflow(select_best(xgb_rs, "rsq")) %>% 
-#  last_fit(TSC_split)
-
-#nnet_last = 
-#  nnet_wf %>% 
-#  finalize_workflow(select_best(nnet_rs, "rmse")) %>% 
-#  last_fit(TSC_split)
-
-
-# Model validation on the testing set
-rf_last %>% 
-  collect_predictions() %>% 
-  ggplot(aes(x = .pred, y = logConc)) +
-  geom_point()
-
-#xgb_last %>% 
-#  collect_predictions() %>% 
-#  ggplot(aes(x = .pred, y = logConc)) +
-#  geom_point()
-
-#nnet_last %>% 
-#  collect_predictions() %>% 
-#  conf_mat(.pred_class, LessThan10)
-
-# Variable importance plot
-library(vip)
-imp_spec = rf_spec %>% 
-  finalize_model(select_best(rf_rs, "rsq")) %>% 
-  set_engine("ranger", importance = "permutation")
-
-workflow() %>% 
-  add_recipe(TSC_recipe) %>% 
-  add_model(imp_spec) %>% 
-  fit(TSC_train) %>% 
-  extract_fit_parsnip() %>% 
-  vip(geom = "point", num_features = 15)
-
-
-#imp_spec = xgb_spec %>% 
-#  finalize_model(select_best(xgb_rs, "rsq")) %>% 
-#  set_engine("xgboost", importance = "permutation")
-
-#workflow() %>% 
-##  add_recipe(TSC_recipe) %>% 
-#  add_model(imp_spec) %>% 
-#  fit(TSC_train) %>% 
-#  extract_fit_parsnip() %>% 
-#  vip(geom = "point", num_features = 15)
-
-# PCA
-#pca_prep = prep(TSC_recipe)
-
-#tidied_pca = tidy(pca_prep, 2)
-
-#tidied_pca %>%
-#  filter(component %in% paste0("PC", 1:5)) %>%
-#  mutate(component = fct_inorder(component)) %>%
-#  ggplot(aes(value, terms, fill = terms)) +
-#  geom_col(show.legend = FALSE) +
-#  facet_wrap(~component, nrow = 1) +
-#  labs(y = NULL) +
-#  theme(axis.text.y = element_text(size = 5))
-
-#tidied_pca %>%
-#  filter(component %in% paste0("PC", 1:4)) %>%
-#  group_by(component) %>%
-#  top_n(8, abs(value)) %>%
-#  ungroup() %>%
-#  mutate(terms = reorder_within(terms, abs(value), component)) %>%
-#  ggplot(aes(abs(value), terms, fill = value > 0)) +
-#  geom_col() +
-#  facet_wrap(~component, scales = "free_y") +
-#  scale_y_reordered() +
-#  labs(
-#    x = "Absolute value of contribution",
-#    y = NULL, fill = "Positive?"
-#  )
-
-
-###############################################################
-#sdev = pca_prep$steps[[2]]$res$sdev
-#percent_variation = sdev^2 / sum(sdev^2)
-#var_df = data.frame(PC=paste0("PC",1:length(sdev)),
-#                     var_explained=percent_variation,
-#                     stringsAsFactors = FALSE)
-#var_df %>%
-#  dplyr::slice(1:10) %>% 
-#  mutate(PC = fct_inorder(PC)) %>%
-#  ggplot(aes(x=PC,y=var_explained))+geom_col()
-```
-
-
-## linear mixed effect model
-```{r, eval=FALSE}
-library(multilevelmod)
-library(tidymodels)
-library(lme4)
-
-MSCdata = FarmData %>% 
-  filter(Test == "MSC") %>% 
-  mutate(logConc = log10(Conc)) %>% 
-  select(-c(Sampling, Test, GreaterLess, SampleTime, UneditConc, Conc)) %>% 
-  select(-c(FarmID, Loc, CertYear, Coop, University))
-
-
-MSC_recipe = recipe(logConc ~., data = MSCdata) %>% 
-  #update_role(FarmID, CertYear, Loc, Coop, University, new_role = "Non-predictor") %>% 
-  step_zv(all_predictors()) %>% 
-  step_normalize(all_numeric_predictors()) %>% 
-  #step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
-  step_nzv(all_predictors(), freq_cut = 90/10) 
-
-MSCdata_proc = MSC_recipe %>% prep() %>% bake(NULL)
-
-lm_fit = lm(formula = logConc ~ ., data = MSCdata_proc)
-summary(lm_fit)
-```
-
-
-## PCA
-```{r, eval=FALSE}
-library(learntidymodels)
-library(patchwork)
-library(ggforce)
-library(tidytext)
-
-pca_prep = prep(MSC_recipe)
-
-tidied_pca = tidy(pca_prep, 2)
-
-tidied_pca %>%
-  filter(component %in% paste0("PC", 1:5)) %>%
-  mutate(component = fct_inorder(component)) %>%
-  ggplot(aes(value, terms, fill = terms)) +
-  geom_col(show.legend = FALSE) +
-  facet_wrap(~component, nrow = 1) +
-  labs(y = NULL) +
-  theme(axis.text.y = element_text(size = 5))
-
-tidied_pca %>%
-  filter(component %in% paste0("PC", 1:4)) %>%
-  group_by(component) %>%
-  top_n(8, abs(value)) %>%
-  ungroup() %>%
-  mutate(terms = reorder_within(terms, abs(value), component)) %>%
-  ggplot(aes(abs(value), terms, fill = value > 0)) +
-  geom_col() +
-  facet_wrap(~component, scales = "free_y") +
-  scale_y_reordered() +
-  labs(
-    x = "Absolute value of contribution",
-    y = NULL, fill = "Positive?"
-  )
-
-
-###############################################################
-rng = extendrange(c(pca_data$PC01, pca_data$PC02))
-plot(pca_data$PC01, pca_data$PC02,
-  xlim = rng, ylim = rng
-)
-
-sdev = pca_prep$steps[[2]]$res$sdev
-percent_variation = sdev^2 / sum(sdev^2)
-var_df = data.frame(PC=paste0("PC",1:length(sdev)),
-                     var_explained=percent_variation,
-                     stringsAsFactors = FALSE)
-var_df %>%
-  dplyr::slice(1:10) %>% 
-  mutate(PC = fct_inorder(PC)) %>%
-  ggplot(aes(x=PC,y=var_explained))+geom_col()
-
-```
-
-
-## Screening multiple preprocessing methods and models
-```{r, eval=FALSE}
-set.seed(1)
-
-# Model for predicting MSC
-MSCdata = FarmData %>% 
-  filter(Test == "MSC") %>% 
-  mutate(LessThan10 = if_else(Conc <= 10, 0, 1) %>% as.factor) %>% 
-  select(-c(FarmID, Sampling, Test, GreaterLess, SampleTime, UneditConc, Conc))
-
-# Subset data for training and testing
-MSC_split= initial_split(MSCdata, prop = 0.7, strata = LessThan10)
-MSC_train = training(MSC_split)
-MSC_test = testing(MSC_split)
-
-# Cross-validation
-MSC_folds = vfold_cv(MSC_train , strata = LessThan10, v = 5)
-
-# Model formula and variable pre-processing
-weatherVars = weatherData %>% 
-  select(-c(FarmID, SampleTime)) %>% 
-  colnames()
-
-pca_rec = recipe(LessThan10 ~ ., data = MSC_train) %>% 
-  #update_role(FarmID, Sampling, Test, GreaterLess, SampleTime, UneditConc, Conc,
-  #            new_role = "Non-predictor") %>% 
-  step_zv(all_predictors()) %>% 
-  step_pca(c("tempmax","tempmin","temp","dew","humidity","precip","precipcover","windgust",      
-             "windspeed","solarradiation","tempmax_1d","tempmin_1d","temp_1d","dew_1d","humidity_1d",
-             "precip_1d", "precipcover_1d", "windgust_1d", "windspeed_1d", "solarradiation_1d","tempmax_2d",
-             "tempmin_2d","temp_2d","dew_2d", "humidity_2d","precip_2d","precipcover_2d","windgust_2d","windspeed_2d",
-             "solarradiation_2d", "tempmax_3d","tempmin_3d", "temp_3d", "dew_3d", "humidity_3d", "precip_3d",
-             "precipcover_3d", "windgust_3d", "windspeed_3d","solarradiation_3d"), threshold = 0.8) %>% 
-  step_normalize(all_numeric_predictors()) %>% 
-  #step_other(all_nominal_predictors(), threshold = 0.5) %>% 
-  step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
-  #step_corr(all_numeric_predictors(), threshold = 0.8) %>% 
-  step_nzv(all_predictors(), freq_cut = 90/10) 
-
-simple_rec = recipe(LessThan10 ~ ., data = MSC_train) %>% 
-  #update_role(FarmID, Sampling, Test, GreaterLess, SampleTime, UneditConc, Conc,
-  #            new_role = "Non-predictor") %>% 
-  step_zv(all_predictors()) %>% 
-  step_normalize(all_numeric_predictors()) %>% 
-  step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
-  step_nzv(all_predictors(), freq_cut = 90/10) 
-
-MSC_recipe %>% prep() %>%  bake(NULL) %>% dim()
-
-# Set up specs for random forest and xgboost
-rf_spec = 
-   rand_forest(
-     trees = 1000,
-     min_n = tune(),
-     mtry = tune()
-     ) %>% 
-   set_engine("ranger") %>% 
-   set_mode("classification")
-
-xgb_spec =   
-  boost_tree(
-    trees = 1000,
-    min_n = tune(),
-    mtry = tune(),
-    tree_depth = tune(),
-    sample_size = tune(),
-    learn_rate = tune()
-  ) %>%
-  set_engine("xgboost") %>% 
-  set_mode("classification")
-
-nnet_spec =
-   mlp(hidden_units = tune(), penalty = tune(), epochs = tune()) %>% 
-   set_engine("nnet", MaxNWts = 2600) %>% 
-   set_mode("classification")
-
-nnet_param = 
-   nnet_spec %>% 
-   extract_parameter_set_dials() %>% 
-   update(hidden_units = hidden_units(c(1, 27)))
-
-
-# Set up grid search for model training
-rf_grid = 
-  grid_max_entropy(
-    min_n(c(1L, 40L)),
-    mtry(c(1L, 50L)),
-    size = 40
-  )
-
-xgb_grid = 
-  grid_max_entropy(
-    tree_depth(c(1L, 10L)),
-    min_n(c(1L, 40L)),
-    mtry(c(1L, 50L)),
-    sample_prop(c(0.1, 1.0)),
-    learn_rate(c(-2, -1)),
-    size = 40
-  )
-
-# workflow set
-all_workflows = workflow_set(
-  preproc = list(pca = pca_rec,
-                 simple = simple_rec),
-  models = list(rf = rf_spec,
-                xgb = xgb_spec,
-                nnet = nnet_spec)
-)
-
-all_workflows = all_workflows %>% 
-   option_add(param_info = nnet_param, id = "pca_nnet") %>% 
-   option_add(param_info = nnet_param, id = "simple_nnet")
-
-# Parallel computing for model training
-library(finetune)
-
-race_ctrl <-
-   control_race(
-      save_pred = TRUE,
-      parallel_over = "everything",
-      save_workflow = TRUE
-   )
-
-race_results <-
-   all_workflows %>%
-   workflow_map(
-      "tune_race_anova",
-      seed = 1503,
-      resamples = MSC_folds,
-      grid = 40,
-      control = race_ctrl
-   )
-
-
-# Compare results from multiple models
-autoplot(
-   race_results,
-   #rank_metric = "accuracy",  
-   #metric = "accuracy",       
-   select_best = TRUE) +
-   geom_text(aes(y = mean - 0.1, label = wflow_id), angle = 90) 
-   #lims(y = c(3.0, 9.5)) +
-   #theme(legend.position = "none")
-
-
-best_results = 
-   race_results %>% 
-   extract_workflow_set_result("simple_rf") %>% 
-   select_best(metric = "accuracy")
-
-rf_test_results = race_results %>% 
-   extract_workflow("simple_rf") %>% 
-   finalize_workflow(best_results) %>% 
-   last_fit(split = MSC_split)
-
-rf_test_results %>% 
-   collect_predictions() %>% 
-   conf_mat(.pred_class, LessThan10)
-
-
-library(vip)
-imp_spec = rf_spec %>% 
-  finalize_model(best_results) %>% 
-  set_engine("ranger", importance = "permutation")
-
-workflow() %>% 
-  add_recipe(MSC_recipe) %>% 
-  add_model(imp_spec) %>% 
-  fit(MSC_train) %>% 
-  extract_fit_parsnip() %>% 
-  vip(geom = "point", num_features = 15)
-```
-
 
 
 
