@@ -698,6 +698,13 @@ MSC_vip = tibble(All = rep(NA,10),
                  noPasture= rep(NA,10),
                  oldFarm = rep(NA,10),
                  newFarm = rep(NA,10))
+MSC_training_rs = tibble(All = NA,
+                 Parlor = NA,
+                 noParlor = NA,
+                 Pasture = NA,
+                 noPasture= NA,
+                 oldFarm = NA,
+                 newFarm = NA)
 MSC_PCA_explained = data.frame(matrix(NA, ncol = 7, nrow = 5)) 
 names(MSC_PCA_explained) = subset_names
 
@@ -735,7 +742,7 @@ for (i in 1:length(MSC_list)){
     add_recipe(MSC_recipe) %>% 
     add_model(rf_spec)
   
-  MSC_folds = vfold_cv(MSC_list[[i]], strata = logConc, v = 3)
+  MSC_folds = vfold_cv(MSC_list[[i]], strata = logConc, v = 3, repeats = 5)
   
   MSC_rs = tune_grid(
     MSC_wf,
@@ -756,6 +763,11 @@ for (i in 1:length(MSC_list)){
     finalize_workflow(choose_tree) 
 
   final_fit = fit(final_model, data = MSC_list[[i]])
+  predictions = predict(final_fit, MSC_list[[i]])
+  results = bind_cols(MSC_list[[i]], predictions)
+  model_rsq = rsq(results, truth = logConc, estimate = .pred)
+  print(paste0("rsq is ", model_rsq$.estimate," for ", subset_names[[i]]))
+  MSC_training_rs[[i]] = model_rsq
   
   # create VIPs
   imp_spec = rf_spec %>% 
@@ -769,15 +781,14 @@ for (i in 1:length(MSC_list)){
       extract_fit_parsnip() %>% 
       vip(geom = "point", num_features = 10)
   
-  file_name = paste0("Figure/MSC/MSC_VIP_", subset_names[i], ".tiff")
+  file_name = paste0("Figure/VIP/MSC/MSC_VIP_", subset_names[i], ".tiff")
   ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
   
   # Create PDPs
   vip_features = vip_plot$data$Variable
   vip_features = vip_features %>% 
     sub("_.*", "", .) %>% 
-    .[!grepl("PC", .)]
-  print(paste0("Top variables are ", vip_features))
+    setdiff(., c("PC1", "PC2", "PC3", "PC4", "PC5"))
   
   # Loop through variable names and categorize based on type in the dataset
   numVar <- character()
@@ -807,7 +818,7 @@ for (i in 1:length(MSC_list)){
            y = "logConc",
            color = NULL)
     
-    file_name = paste0("Figure/MSC/PDP/MSC_pdp_", subset_names[i], "_", numVar[j], ".tiff")
+    file_name = paste0("Figure/PDP/By spore type/MSC/MSC_pdp_", subset_names[i], "_", numVar[j], ".tiff")
     ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
     
     numPlots[[j]] = pdp
@@ -815,7 +826,7 @@ for (i in 1:length(MSC_list)){
   }
   
   numPlots_grid = gridExtra::grid.arrange(grobs = numPlots, ncol = 3)
-  file_name = paste0("Figure/MSC/NumVars_MSC_", subset_names[i], ".pdf")
+  file_name = paste0("Figure/PDP/By spore type/MSC/NumVars_MSC_", subset_names[i], ".pdf")
   ggsave(file_name, numPlots_grid, 
          height = 4, width = 8, units = "in", dpi = "retina")
   
@@ -830,7 +841,7 @@ for (i in 1:length(MSC_list)){
            color = NULL)+
       theme(axis.text.x = element_text(size = 4))
     
-    file_name = paste0("Figure/MSC/PDP/MSC_pdp_", subset_names[i], "_", catVar[k], ".tiff")
+    file_name = paste0("Figure/PDP/By spore type/MSC/MSC_pdp_", subset_names[i], "_", catVar[k], ".tiff")
     ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
     
     catPlots[[k]] = pdp
@@ -838,7 +849,7 @@ for (i in 1:length(MSC_list)){
   }
   
   catPlots_grid = gridExtra::grid.arrange(grobs = catPlots, ncol = 3)
-  file_name = paste0("Figure/MSC/CatVars_MSC_", subset_names[i], ".pdf")
+  file_name = paste0("Figure/PDP/By spore type/MSC/CatVars_MSC_", subset_names[i], ".pdf")
   ggsave(file_name, catPlots_grid,
          height = 4, width = 8, units = "in", dpi = "retina")
 
@@ -859,7 +870,7 @@ for (i in 1:length(MSC_list)){
     facet_wrap(~component, nrow = 1) +
     labs(y = NULL) +
     theme(axis.text.y = element_text(size = 5))
-  file_name = paste0("Figure/MSC/MSC_PCA_", subset_names[i], ".tiff")
+  file_name = paste0("Figure/PCA/MSC/MSC_PCA_", subset_names[i], ".tiff")
   ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
 
   tidied_pca %>%
@@ -876,7 +887,7 @@ for (i in 1:length(MSC_list)){
       x = "Absolute value of contribution",
       y = NULL, fill = "Positive?"
     )
-    file_name = paste0("Figure/MSC/MSC_PCA_top_", subset_names[i], ".tiff")
+    file_name = paste0("Figure/PCA/MSC/MSC_PCA_top_", subset_names[i], ".tiff")
     ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
     
     sdev = pca_prep$steps[[3]]$res$sdev
@@ -913,6 +924,13 @@ TSC_vip = tibble(All = rep(NA,10),
                  noPasture= rep(NA,10),
                  oldFarm = rep(NA,10),
                  newFarm = rep(NA,10))
+TSC_training_rs = tibble(All = NA,
+                 Parlor = NA,
+                 noParlor = NA,
+                 Pasture = NA,
+                 noPasture= NA,
+                 oldFarm = NA,
+                 newFarm = NA)
 TSC_PCA_explained = data.frame(matrix(NA, ncol = 7, nrow = 5)) 
 names(TSC_PCA_explained) = subset_names
 
@@ -950,7 +968,7 @@ for (i in 1:length(TSC_list)){
     add_recipe(TSC_recipe) %>% 
     add_model(rf_spec)
   
-  TSC_folds = vfold_cv(TSC_list[[i]], strata = logConc, v = 3)
+  TSC_folds = vfold_cv(TSC_list[[i]], strata = logConc, v = 3, repeats = 5)
   
   TSC_rs = tune_grid(
     TSC_wf,
@@ -971,6 +989,12 @@ for (i in 1:length(TSC_list)){
     finalize_workflow(choose_tree) 
 
   final_fit = fit(final_model, data = TSC_list[[i]])
+  predictions = predict(final_fit, TSC_list[[i]])
+  results = bind_cols(TSC_list[[i]], predictions)
+  model_rsq = rsq(results, truth = logConc, estimate = .pred)
+  print(paste0("rsq is ", model_rsq$.estimate," for ", subset_names[[i]]))
+  TSC_training_rs[[i]] = model_rsq
+  
   
   # create VIPs
   imp_spec = rf_spec %>% 
@@ -984,15 +1008,14 @@ for (i in 1:length(TSC_list)){
       extract_fit_parsnip() %>% 
       vip(geom = "point", num_features = 10)
   
-  file_name = paste0("Figure/TSC/TSC_VIP_", subset_names[i], ".tiff")
+  file_name = paste0("Figure/VIP/TSC/TSC_VIP_", subset_names[i], ".tiff")
   ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
   
   # Create PDPs
   vip_features = vip_plot$data$Variable
   vip_features = vip_features %>% 
     sub("_.*", "", .) %>% 
-    .[!grepl("PC", .)]
-  print(paste0("Top variables are ", vip_features))
+    setdiff(., c("PC1", "PC2", "PC3", "PC4", "PC5"))
   
   # Loop through variable names and categorize based on type in the dataset
   numVar <- character()
@@ -1022,7 +1045,7 @@ for (i in 1:length(TSC_list)){
            y = "logConc",
            color = NULL)
     
-    file_name = paste0("Figure/TSC/PDP/TSC_pdp_", subset_names[i], "_", numVar[j], ".tiff")
+    file_name = paste0("Figure/PDP/By spore type/TSC/TSC_pdp_", subset_names[i], "_", numVar[j], ".tiff")
     ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
     
     numPlots[[j]] = pdp
@@ -1030,7 +1053,7 @@ for (i in 1:length(TSC_list)){
   }
   
   numPlots_grid = gridExtra::grid.arrange(grobs = numPlots, ncol = 3)
-  file_name = paste0("Figure/TSC/NumVars_TSC_", subset_names[i], ".pdf")
+  file_name = paste0("Figure/PDP/By spore type/TSC/NumVars_TSC_", subset_names[i], ".pdf")
   ggsave(file_name, numPlots_grid, 
          height = 4, width = 8, units = "in", dpi = "retina")
   
@@ -1045,7 +1068,7 @@ for (i in 1:length(TSC_list)){
            color = NULL)+
       theme(axis.text.x = element_text(size = 4))
     
-    file_name = paste0("Figure/TSC/PDP/TSC_pdp_", subset_names[i], "_", catVar[k], ".tiff")
+    file_name = paste0("Figure/PDP/By spore type/TSC/TSC_pdp_", subset_names[i], "_", catVar[k], ".tiff")
     ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
     
     catPlots[[k]] = pdp
@@ -1053,7 +1076,7 @@ for (i in 1:length(TSC_list)){
   }
   
   catPlots_grid = gridExtra::grid.arrange(grobs = catPlots, ncol = 3)
-  file_name = paste0("Figure/TSC/CatVars_TSC_", subset_names[i], ".pdf")
+  file_name = paste0("Figure/PDP/By spore type/TSC/CatVars_TSC_", subset_names[i], ".pdf")
   ggsave(file_name, catPlots_grid,
          height = 4, width = 8, units = "in", dpi = "retina")
 
@@ -1074,7 +1097,7 @@ for (i in 1:length(TSC_list)){
     facet_wrap(~component, nrow = 1) +
     labs(y = NULL) +
     theme(axis.text.y = element_text(size = 5))
-  file_name = paste0("Figure/TSC/TSC_PCA_", subset_names[i], ".tiff")
+  file_name = paste0("Figure/PCA/TSC/TSC_PCA_", subset_names[i], ".tiff")
   ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
 
   tidied_pca %>%
@@ -1091,7 +1114,7 @@ for (i in 1:length(TSC_list)){
       x = "Absolute value of contribution",
       y = NULL, fill = "Positive?"
     )
-    file_name = paste0("Figure/TSC/TSC_PCA_top_", subset_names[i], ".tiff")
+    file_name = paste0("Figure/PCA/TSC/TSC_PCA_top_", subset_names[i], ".tiff")
     ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
     
     sdev = pca_prep$steps[[3]]$res$sdev
@@ -1128,6 +1151,13 @@ PSC_vip = tibble(All = rep(NA,10),
                  noPasture= rep(NA,10),
                  oldFarm = rep(NA,10),
                  newFarm = rep(NA,10))
+PSC_training_rs = tibble(All = rep(NA,3),
+                 Parlor = rep(NA,3),
+                 noParlor = rep(NA,3),
+                 Pasture = rep(NA,3),
+                 noPasture= rep(NA,3),
+                 oldFarm = rep(NA,3),
+                 newFarm = rep(NA,3))
 PSC_PCA_explained = data.frame(matrix(NA, ncol = 7, nrow = 5)) 
 names(PSC_PCA_explained) = subset_names
 
@@ -1166,13 +1196,13 @@ for (i in 1:length(PSC_list)){
     add_recipe(PSC_recipe) %>% 
     add_model(rf_spec)
   
-  PSC_folds = vfold_cv(PSC_list[[i]], strata = Pres, v = 3)
+  PSC_folds = vfold_cv(PSC_list[[i]], strata = Pres, v = 3, repeats = 5)
   
   PSC_rs = tune_grid(
     PSC_wf,
     PSC_folds,
     grid = rf_grid,
-    metrics = metric_set(roc_auc, accuracy),
+    metrics = metric_set(roc_auc, accuracy, sensitivity, specificity),
     control = control_grid(verbose = FALSE)
   )
   
@@ -1187,6 +1217,13 @@ for (i in 1:length(PSC_list)){
     finalize_workflow(choose_tree) 
 
   final_fit = fit(final_model, data = PSC_list[[i]])
+  predictions = predict(final_fit, PSC_list[[i]])
+  results = bind_cols(PSC_list[[i]], predictions)
+  acc = accuracy(results, truth = Pres, estimate = .pred_class)
+  se = sensitivity(results, truth = Pres, estimate = .pred_class)
+  sp = specificity(results, truth = Pres, estimate = .pred_class)
+  print(paste0("se is ", se$.estimate, " and sp is ", sp$.estimate, " for ", subset_names[[i]]))
+  PSC_training_rs[[i]] = c(acc$.estimate, se$.estimate, sp$.estimate)
   
   # create VIPs
   imp_spec = rf_spec %>% 
@@ -1200,15 +1237,14 @@ for (i in 1:length(PSC_list)){
       extract_fit_parsnip() %>% 
       vip(geom = "point", num_features = 10)
   
-  file_name = paste0("Figure/PSC/PSC_VIP_", subset_names[i], ".tiff")
+  file_name = paste0("Figure/VIP/PSC/PSC_VIP_", subset_names[i], ".tiff")
   ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
   
   # Create PDPs
   vip_features = vip_plot$data$Variable
   vip_features = vip_features %>% 
     sub("_.*", "", .) %>% 
-    .[!grepl("PC", .)]
-  print(paste0("Top variables are ", vip_features))
+    setdiff(., c("PC1", "PC2", "PC3", "PC4", "PC5"))
   
   # Loop through variable names and categorize based on type in the dataset
   numVar <- character()
@@ -1238,7 +1274,7 @@ for (i in 1:length(PSC_list)){
            y = "Likelihood of Presence",
            color = NULL)
     
-    file_name = paste0("Figure/PSC/PDP/PSC_pdp_", subset_names[i], "_", numVar[j], ".tiff")
+    file_name = paste0("Figure/PDP/By spore type/PSC/PSC_pdp_", subset_names[i], "_", numVar[j], ".tiff")
     ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
     
     numPlots[[j]] = pdp
@@ -1246,7 +1282,7 @@ for (i in 1:length(PSC_list)){
   }
   
   numPlots_grid = gridExtra::grid.arrange(grobs = numPlots, ncol = 3)
-  file_name = paste0("Figure/PSC/NumVars_PSC_", subset_names[i], ".pdf")
+  file_name = paste0("Figure/PDP/By spore type/PSC/NumVars_PSC_", subset_names[i], ".pdf")
   ggsave(file_name, numPlots_grid, 
          height = 4, width = 8, units = "in", dpi = "retina")
   
@@ -1261,7 +1297,7 @@ for (i in 1:length(PSC_list)){
            color = NULL)+
       theme(axis.text.x = element_text(size = 4))
     
-    file_name = paste0("Figure/PSC/PDP/PSC_pdp_", subset_names[i], "_", catVar[k], ".tiff")
+    file_name = paste0("Figure/PDP/By spore type/PSC/PSC_pdp_", subset_names[i], "_", catVar[k], ".tiff")
     ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
     
     catPlots[[k]] = pdp
@@ -1269,7 +1305,7 @@ for (i in 1:length(PSC_list)){
   }
   
   catPlots_grid = gridExtra::grid.arrange(grobs = catPlots, ncol = 3)
-  file_name = paste0("Figure/PSC/CatVars_PSC_", subset_names[i], ".pdf")
+  file_name = paste0("Figure/PDP/By spore type/PSC/CatVars_PSC_", subset_names[i], ".pdf")
   ggsave(file_name, catPlots_grid,
          height = 4, width = 8, units = "in", dpi = "retina")
 
@@ -1290,7 +1326,7 @@ for (i in 1:length(PSC_list)){
     facet_wrap(~component, nrow = 1) +
     labs(y = NULL) +
     theme(axis.text.y = element_text(size = 5))
-  file_name = paste0("Figure/PSC/PSC_PCA_", subset_names[i], ".tiff")
+  file_name = paste0("Figure/PCA/PSC/PSC_PCA_", subset_names[i], ".tiff")
   ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
 
   tidied_pca %>%
@@ -1307,7 +1343,7 @@ for (i in 1:length(PSC_list)){
       x = "Absolute value of contribution",
       y = NULL, fill = "Positive?"
     )
-    file_name = paste0("Figure/PSC/PSC_PCA_top_", subset_names[i], ".tiff")
+    file_name = paste0("Figure/PCA/PSC/PSC_PCA_top_", subset_names[i], ".tiff")
     ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
     
     sdev = pca_prep$steps[[3]]$res$sdev
@@ -1345,6 +1381,13 @@ BAB_vip = tibble(All = rep(NA,10),
                  noPasture= rep(NA,10),
                  oldFarm = rep(NA,10),
                  newFarm = rep(NA,10))
+BAB_training_rs = tibble(All = NA,
+                 Parlor = NA,
+                 noParlor = NA,
+                 Pasture = NA,
+                 noPasture= NA,
+                 oldFarm = NA,
+                 newFarm = NA)
 BAB_PCA_explained = data.frame(matrix(NA, ncol = 7, nrow = 5)) 
 names(BAB_PCA_explained) = subset_names
 
@@ -1382,7 +1425,7 @@ for (i in 1:length(BAB_list)){
     add_recipe(BAB_recipe) %>% 
     add_model(rf_spec)
   
-  BAB_folds = vfold_cv(BAB_list[[i]], strata = logConc, v = 3)
+  BAB_folds = vfold_cv(BAB_list[[i]], strata = logConc, v = 3, repeats = 5)
   
   BAB_rs = tune_grid(
     BAB_wf,
@@ -1403,6 +1446,11 @@ for (i in 1:length(BAB_list)){
     finalize_workflow(choose_tree) 
 
   final_fit = fit(final_model, data = BAB_list[[i]])
+  predictions = predict(final_fit, BAB_list[[i]])
+  results = bind_cols(BAB_list[[i]], predictions)
+  model_rsq = rsq(results, truth = logConc, estimate = .pred)
+  print(paste0("rsq is ", model_rsq$.estimate," for ", subset_names[[i]]))
+  BAB_training_rs[[i]] = model_rsq
   
   # create VIPs
   imp_spec = rf_spec %>% 
@@ -1416,15 +1464,14 @@ for (i in 1:length(BAB_list)){
       extract_fit_parsnip() %>% 
       vip(geom = "point", num_features = 10)
   
-  file_name = paste0("Figure/BAB/BAB_VIP_", subset_names[i], ".tiff")
+  file_name = paste0("Figure/VIP/BAB/BAB_VIP_", subset_names[i], ".tiff")
   ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
   
   # Create PDPs
   vip_features = vip_plot$data$Variable
   vip_features = vip_features %>% 
     sub("_.*", "", .) %>% 
-    .[!grepl("PC", .)]
-  print(paste0("Top variables are ", vip_features))
+    setdiff(., c("PC1", "PC2", "PC3", "PC4", "PC5"))
   
   # Loop through variable names and categorize based on type in the dataset
   numVar <- character()
@@ -1454,7 +1501,7 @@ for (i in 1:length(BAB_list)){
            y = "logConc",
            color = NULL)
     
-    file_name = paste0("Figure/BAB/PDP/BAB_pdp_", subset_names[i], "_", numVar[j], ".tiff")
+    file_name = paste0("Figure/PDP/By spore type/BAB/BAB_pdp_", subset_names[i], "_", numVar[j], ".tiff")
     ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
     
     numPlots[[j]] = pdp
@@ -1462,7 +1509,7 @@ for (i in 1:length(BAB_list)){
   }
   
   numPlots_grid = gridExtra::grid.arrange(grobs = numPlots, ncol = 3)
-  file_name = paste0("Figure/BAB/NumVars_BAB_", subset_names[i], ".pdf")
+  file_name = paste0("Figure/PDP/By spore type/BAB/NumVars_BAB_", subset_names[i], ".pdf")
   ggsave(file_name, numPlots_grid, 
          height = 4, width = 8, units = "in", dpi = "retina")
   
@@ -1477,7 +1524,7 @@ for (i in 1:length(BAB_list)){
            color = NULL)+
       theme(axis.text.x = element_text(size = 4))
     
-    file_name = paste0("Figure/BAB/PDP/BAB_pdp_", subset_names[i], "_", catVar[k], ".tiff")
+    file_name = paste0("Figure/PDP/By spore type/BAB/BAB_pdp_", subset_names[i], "_", catVar[k], ".tiff")
     ggsave(file_name, height = 4, width = 4, units = "in", dpi = "retina")
     
     catPlots[[k]] = pdp
@@ -1485,7 +1532,7 @@ for (i in 1:length(BAB_list)){
   }
   
   catPlots_grid = gridExtra::grid.arrange(grobs = catPlots, ncol = 3)
-  file_name = paste0("Figure/BAB/CatVars_BAB_", subset_names[i], ".pdf")
+  file_name = paste0("Figure/PDP/By spore type/BAB/CatVars_BAB_", subset_names[i], ".pdf")
   ggsave(file_name, catPlots_grid,
          height = 4, width = 8, units = "in", dpi = "retina")
 
@@ -1505,7 +1552,7 @@ for (i in 1:length(BAB_list)){
     facet_wrap(~component, nrow = 1) +
     labs(y = NULL) +
     theme(axis.text.y = element_text(size = 5))
-  file_name = paste0("Figure/BAB/BAB_PCA_", subset_names[i], ".tiff")
+  file_name = paste0("Figure/PCA/BAB/BAB_PCA_", subset_names[i], ".tiff")
   ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
 
   tidied_pca %>%
@@ -1522,7 +1569,7 @@ for (i in 1:length(BAB_list)){
       x = "Absolute value of contribution",
       y = NULL, fill = "Positive?"
     )
-    file_name = paste0("Figure/BAB/BAB_PCA_top_", subset_names[i], ".tiff")
+    file_name = paste0("Figure/PCA/BAB/BAB_PCA_top_", subset_names[i], ".tiff")
     ggsave(file_name, height = 4, width = 8, units = "in", dpi = "retina")
     
     sdev = pca_prep$steps[[3]]$res$sdev
@@ -1602,7 +1649,11 @@ heatmapData = heatmapData %>%
     Vars == "BedAddFreq_X...2x.per.day" ~ "Frequency of adding bedding more than 2 times per day",
     Vars == "FullEmpNum" ~ "Number of full-time employees",
     Vars == "PartEmp_Yes" ~ "Presence of part-time employees to milk cows",
-    Vars == "PastureTime" ~ "Hours cows spend on pasture"
+    Vars == "PastureTime" ~ "Hours cows spend on pasture",
+    Vars == "DryHay_Yes" ~ "Feeding dry hay",
+    Vars == "HouseStyle_Tie.stalls.or.stanchions" ~ "Tie stalls or stanchions",
+    Vars == "FeedPurchase_Yes" ~ "Purchase feed",
+    TRUE ~ Vars
   ))
 
 heatmapData = heatmapData %>%
