@@ -321,48 +321,56 @@ FarmData %>%
 
 ## 3. Descriptive analysis
 ```{r, eval=FALSE}
+testData = microTest %>% 
+  mutate(Test = if_else(Test == "APC", "SPC", Test)) %>% 
+  mutate(Notes = replace_na(Notes, "No notes")) %>% 
+  mutate(Notes = tolower(Notes)) %>% 
+  filter(Notes == "no notes") 
+
+testData$Test = factor(testData$Test, levels = c("SPC", "PSC", "MSC", "TSC", "BAB"))
+
 # summary stats
-FarmData %>% 
+testData %>% 
   group_by(Test) %>% 
   summarise(mean_count = mean(log10(Conc)),
             sd_count = sd(log10(Conc)),
             n = n())
 
 # check prevalence
-FarmData %>% 
+testData %>% 
   filter(Test == "MSC") %>% 
   count(Conc == 0.125)
 
-FarmData %>% 
+testData %>% 
   filter(Test == "BAB") %>% 
   count(Conc == 4.5)
 
-FarmData %>% 
+testData %>% 
   filter(Test == "TSC") %>% 
   count(Conc == 0.125)
 
-FarmData %>% 
+testData %>% 
   filter(Test == "PSC") %>% 
   count(Conc == 0.005)
 
 # summary by farm
-FarmData %>% 
+testData %>% 
   group_by(FarmID) %>%
-  filter(Test == "APC") %>% 
+  filter(Test == "SPC") %>% 
   summarise(mean_count = mean(log10(Conc)),
             sd_count = sd(log10(Conc)),
             n = n()) %>% 
   arrange(sd_count)
 
-FarmData %>% 
+testData %>% 
   group_by(FarmID) %>%
-  filter(Test == "APC") %>% 
+  filter(Test == "SPC") %>% 
   summarise(mean_count = mean(log10(Conc)),
             sd_count = sd(log10(Conc)),
             n = n()) %>% 
   arrange(mean_count)
 
-FarmData %>% 
+testData %>% 
   filter(Test == "MSC") %>% 
   group_by(FarmID) %>%
   summarise(mean_count = mean(log10(Conc)),
@@ -377,8 +385,8 @@ FarmData %>%
             sd_max = max(sd_count, na.rm = T),
             sd_min = min(sd_count, na.rm = T))
 ## cv by type
-FarmData %>% 
-  filter(Test == "APC") %>% 
+testData %>% 
+  filter(Test == "SPC") %>% 
   group_by(FarmID) %>%
   summarise(mean_count = mean(log10(Conc)),
             sd_count = sd(log10(Conc)),
@@ -386,7 +394,7 @@ FarmData %>%
   summarise(mean_CV = sd(mean_count)/mean(mean_count),
             sd_CV = sd(sd_count, na.rm = T)/mean(sd_count, na.rm = T))
 
-FarmData %>% 
+testData %>% 
   filter(Test == "MSC") %>% 
   group_by(FarmID) %>%
   summarise(mean_count = mean(log10(Conc)),
@@ -395,7 +403,7 @@ FarmData %>%
   summarise(mean_CV = sd(mean_count)/mean(mean_count),
             sd_CV = sd(sd_count, na.rm = T)/mean(sd_count, na.rm = T))
 
-FarmData %>% 
+testData %>% 
   filter(Test == "BAB") %>% 
   group_by(FarmID) %>%
   summarise(mean_count = mean(log10(Conc)),
@@ -404,7 +412,7 @@ FarmData %>%
   summarise(mean_CV = sd(mean_count)/mean(mean_count),
             sd_CV = sd(sd_count, na.rm = T)/mean(sd_count, na.rm = T))
 
-FarmData %>% 
+testData %>% 
   filter(Test == "TSC") %>% 
   group_by(FarmID) %>%
   summarise(mean_count = mean(log10(Conc)),
@@ -413,7 +421,7 @@ FarmData %>%
   summarise(mean_CV = sd(mean_count)/mean(mean_count),
             sd_CV = sd(sd_count, na.rm = T)/mean(sd_count, na.rm = T))
 
-FarmData %>% 
+testData %>% 
   filter(Test == "PSC") %>% 
   group_by(FarmID) %>%
   summarise(mean_count = mean(log10(Conc)),
@@ -423,7 +431,7 @@ FarmData %>%
             sd_CV = sd(sd_count, na.rm = T)/mean(sd_count, na.rm = T))
 
 ## plot for summary stats by farm
-FarmData %>% 
+testData %>% 
   group_by(FarmID, Test) %>%
   summarise(mean_count = mean(log10(Conc)),
             sd_count = sd(log10(Conc))) %>% 
@@ -435,7 +443,7 @@ FarmData %>%
         axis.title.x=element_blank())
 ggsave("Manuscript/mean by farm.tiff", height = 2, width = 8, units = "in", dpi = "retina")
 
-FarmData %>% 
+testData %>% 
   group_by(FarmID, Test) %>%
   summarise(mean_count = mean(log10(Conc)),
             sd_count = sd(log10(Conc))) %>% 
@@ -447,12 +455,8 @@ FarmData %>%
         axis.title.x=element_blank())
 ggsave("Manuscript/sd by farm.tiff", height = 2, width = 8, units = "in", dpi = "retina")
 
-```
-
-
-```{r, eval=FALSE}
 ## correlation between spore types
-FarmData %>%
+testData %>%
   group_by(FarmID, Sampling, Test) %>%
   filter(n() > 1L) %>% 
   ungroup() %>% 
