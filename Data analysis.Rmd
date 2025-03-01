@@ -692,8 +692,11 @@ ggplot_pdp_cat <- function(obj, x) {
 ```{r}
 set.seed(1)
 
+# create a list of data subsets
 MSC_list = list(MSCdata, MSC_Parlor, MSC_noParlor, MSC_Pasture, MSC_noPasture, MSC_oldFarm, MSC_newFarm)
 subset_names = c("All", "Parlor","noParlor","Pasture","noPasture","oldFarm", "newFarm")
+
+# create empty data frames to store the model parameters, vip, and performance later
 MSC_rs_paras = tibble()
 MSC_vip = tibble(All = rep(NA,10),
                  Parlor = rep(NA,10),
@@ -712,7 +715,7 @@ MSC_training_rs = tibble(All = NA,
 MSC_PCA_explained = data.frame(matrix(NA, ncol = 7, nrow = 5)) 
 names(MSC_PCA_explained) = subset_names
 
-## Model formula
+# create recipe for data pre-processing 
 for (i in 1:length(MSC_list)){
   MSC_recipe = recipe(logConc ~ ., data = MSC_list[[i]]) %>% 
     step_zv(all_predictors()) %>% 
@@ -726,6 +729,7 @@ for (i in 1:length(MSC_list)){
     step_dummy(all_nominal_predictors(), one_hot = FALSE) %>% 
     step_nzv(all_predictors(), freq_cut = 85/15) 
 
+  # set up specification of algorithm
   rf_spec = rand_forest(
      trees = 1000,
      min_n = tune(),
@@ -736,18 +740,22 @@ for (i in 1:length(MSC_list)){
   dimension = MSC_recipe %>% prep() %>% bake(NULL) %>% dim()
   nVar = dimension[2]
   
+  # set up hyperparameter configuration
   rf_grid = grid_max_entropy(
     min_n(c(2L, 10L)),
     mtry(c(1L, nVar - 1)),
     size = 40
   )
   
+  # create workflow by combining recipe and rf specification
   MSC_wf = workflow() %>% 
     add_recipe(MSC_recipe) %>% 
     add_model(rf_spec)
   
+  # set up cross-validation
   MSC_folds = vfold_cv(MSC_list[[i]], strata = logConc, v = 3, repeats = 5)
   
+  # train and tune the model
   MSC_rs = tune_grid(
     MSC_wf,
     MSC_folds,
@@ -756,6 +764,7 @@ for (i in 1:length(MSC_list)){
     control = control_grid(verbose = FALSE)
   )
   
+  # store the best model parameters
   best_rs = show_best(MSC_rs, metric = "rsq")
   best_rs_paras = best_rs %>% slice(1) %>% mutate(dataset = subset_names[i])
   MSC_rs_paras = bind_rows(best_rs_paras, MSC_rs_paras)
@@ -766,6 +775,7 @@ for (i in 1:length(MSC_list)){
   final_model = MSC_wf %>% 
     finalize_workflow(choose_tree) 
 
+  # fit the model to the original data and display results
   final_fit = fit(final_model, data = MSC_list[[i]])
   predictions = predict(final_fit, MSC_list[[i]])
   results = bind_cols(MSC_list[[i]], predictions)
